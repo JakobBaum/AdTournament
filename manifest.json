@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Autodarts Tournament",
+  "version": "1.0",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://play.autodarts.io/*",
+    "https://api.autodarts.io/*",
+    "https://login.autodarts.io/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://play.autodarts.io/*"
+      ],
+      "js": [
+        "dist/content.bundle.js"
+      ],
+      "css": [
+        "src/tournament.css"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "dist/tournament-app.bundle.js",
+        "tournament.png",
+        "src/tournament.css",
+        "src/injected.js"
+      ],
+      "matches": [
+        "https://play.autodarts.io/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_icon": "Logo.png"
+  }
+}
