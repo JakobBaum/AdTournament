@@ -20,8 +20,8 @@ function persistToken(token, savedAt = Date.now()) {
   if (!token) return;
 
   try {
-    localStorage.setItem("adTourneyBearerToken", token);
-    localStorage.setItem("adTourneyBearerTokenSavedAt", String(savedAt));
+    localStorage.setItem("AdTournamentExtensionBearerToken", token);
+    localStorage.setItem("AdTournamentExtensionBearerTokenSavedAT", String(savedAt));
   } catch (error) {
     console.warn("[Autodarts Tournament] localStorage write failed", error);
   }

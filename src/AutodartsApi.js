@@ -1,5 +1,5 @@
-const TOKEN_STORAGE_KEY = "adTourneyBearerToken";
-const TOKEN_SAVED_AT_KEY = "adTourneyBearerTokenSavedAt";
+const TOKEN_STORAGE_KEY = "AdTournamentExtensionBearerToken";
+const TOKEN_SAVED_AT_KEY = "AdTournamentExtensionBearerTokenSavedAT";
 
 const API_BASE = "https://api.autodarts.io";
 const ENDPOINTS = {
