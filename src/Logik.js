@@ -614,13 +614,13 @@ export class Logik {
     let groups = [];
 
     if (type == "KO") {
-      playersWithIds = await this.db.createPlayers(tournamentId, players);
+      playersWithIds = await this.db.createPlayers(tournamentId, players, settings);
       await new Promise((r) => setTimeout(r, 0));
       data = this.generateKOTournament(playersWithIds, settings);
     } else {
       const previewData = this.generateTournament(players, playersPerGroup, qualifiedPerGroup, settings);
       groups = await this.db.createGroups(tournamentId, previewData.groups);
-      playersWithIds = await this.db.createPlayersGroups(tournamentId, groups);
+      playersWithIds = await this.db.createPlayersGroups(tournamentId, groups, settings);
       data = this.generateTournament(playersWithIds, playersPerGroup, qualifiedPerGroup, settings);
     }
 

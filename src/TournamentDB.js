@@ -11,6 +11,7 @@ import {
   getDoc,
   getDocs,
   where,
+  deleteField,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -27,7 +28,7 @@ const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // 🔥 Default Player Stats zentral
-const DEFAULT_PLAYER_STATS = {
+const COMMON_PLAYER_STATS = {
   points: 0,
   matchesPlayed: 0,
   wins: 0,
@@ -36,26 +37,72 @@ const DEFAULT_PLAYER_STATS = {
   legsLost: 0,
   setsWon: 0,
   setsLost: 0,
+  dartsThrown: 0,
+};
 
+const X01_PLAYER_STATS = {
   totalAverageSum: 0,
   averageCount: 0,
   average: 0,
-
   totalCheckoutsHit: 0,
   totalCheckouts: 0,
   checkoutPercent: 0,
-
   plus60: 0,
   plus100: 0,
   plus140: 0,
   plus170Or180: 0,
-
   bestCheckout: 0,
+};
+
+const CRICKET_PLAYER_STATS = {
+  totalMprSum: 0,
+  mprCount: 0,
+  mpr: 0,
+  totalFirst9MprSum: 0,
+  first9MprCount: 0,
+  first9MPR: 0,
+  mark5: 0,
+  mark6: 0,
+  mark7: 0,
+  mark8: 0,
+  mark9: 0,
+  whiteHorse: 0,
+};
+
+const DEFAULT_PLAYER_STATS = {
+  ...COMMON_PLAYER_STATS,
+  ...X01_PLAYER_STATS,
+  ...CRICKET_PLAYER_STATS,
 };
 
 export class TournamentDB {
   constructor() {
     this.db = db;
+  }
+
+  resolveTournamentType(input = null) {
+    const type =
+      input?.tournamentType ||
+      input?.variant ||
+      input?.settings?.tournamentType ||
+      input?.settings?.variant ||
+      input?.settings?.defaultMatchSettings?.tournamentType ||
+      input?.settings?.defaultMatchSettings?.variant;
+
+    return type === "Cricket" ? "Cricket" : "X01";
+  }
+
+  getStoredPlayerStatsDefaults(tournamentType = "X01") {
+    return {
+      ...COMMON_PLAYER_STATS,
+      ...(tournamentType === "Cricket" ? CRICKET_PLAYER_STATS : X01_PLAYER_STATS),
+    };
+  }
+
+  getIrrelevantPlayerStatsCleanup(tournamentType = "X01") {
+    const irrelevant = tournamentType === "Cricket" ? X01_PLAYER_STATS : CRICKET_PLAYER_STATS;
+
+    return Object.fromEntries(Object.keys(irrelevant).map((key) => [key, deleteField()]));
   }
 
   // =========================
@@ -76,23 +123,23 @@ export class TournamentDB {
   normalizePlayerStats(stats = {}) {
     return {
       average: Number(stats?.average || 0),
-
-      checkoutsHit: Number(
-        stats?.checkoutsHit ??
-        0
-      ),
-
-      checkoutsAttempted: Number(
-        stats?.checkouts ??
-        0
-      ),
-
+      checkoutsHit: Number(stats?.checkoutsHit ?? 0),
+      checkoutsAttempted: Number(stats?.checkouts ?? 0),
       plus60: Number(stats?.plus60 || 0),
       plus100: Number(stats?.plus100 || 0),
       plus140: Number(stats?.plus140 || 0),
       plus170: Number(stats?.plus170 || 0),
       total180: Number(stats?.total180 || 0),
       checkoutPoints: Number(stats?.checkoutPoints || 0),
+      mpr: Number(stats?.mpr || 0),
+      first9MPR: Number(stats?.first9MPR || stats?.first9Mpr || 0),
+      mark5: Number(stats?.mark5 || 0),
+      mark6: Number(stats?.mark6 || 0),
+      mark7: Number(stats?.mark7 || 0),
+      mark8: Number(stats?.mark8 || 0),
+      mark9: Number(stats?.mark9 || 0),
+      whiteHorse: Number(stats?.whiteHorse || 0),
+      dartsThrown: Number(stats?.dartsThrown || stats?.thrownDarts || stats?.totalDarts || 0),
     };
   }
 
@@ -106,6 +153,20 @@ export class TournamentDB {
     ];
 
     return possibleDartCounts.some((value) => Number(value || 0) > 0);
+  }
+
+  isCricketStats(stats = {}) {
+    return [
+      stats?.mpr,
+      stats?.first9MPR,
+      stats?.first9Mpr,
+      stats?.mark5,
+      stats?.mark6,
+      stats?.mark7,
+      stats?.mark8,
+      stats?.mark9,
+      stats?.whiteHorse,
+    ].some((value) => Number(value || 0) > 0);
   }
 
   extractScoreSummary(score) {
@@ -318,11 +379,11 @@ export class TournamentDB {
       scorePlayer1: null,
       scorePlayer2: null,
       ...(preserveStats
-      ? {}
-      : {
-          finalPlayerStats: null,
-          statsUpdatedAt: null,
-        }),
+        ? {}
+        : {
+            finalPlayerStats: null,
+            statsUpdatedAt: null,
+          }),
       resultSource: null,
       manuallyCorrectedAt: null,
       lobbyId: null,
@@ -379,21 +440,43 @@ export class TournamentDB {
         player2Stats.wins += 1;
         player1Stats.losses += 1;
       }
-
       const score1 = this.extractScoreSummary(match.scorePlayer1);
       const score2 = this.extractScoreSummary(match.scorePlayer2);
+      const finalEntries = Array.isArray(match.finalPlayerStats) ? match.finalPlayerStats : [];
 
-      player1Stats.legsWon += score1.legs;
-      player1Stats.legsLost += score2.legs;
-      player2Stats.legsWon += score2.legs;
-      player2Stats.legsLost += score1.legs;
+      const findFinalEntryForPlayer = (playerName) =>
+        finalEntries.find(
+          (entry) =>
+            String(entry?.name || "")
+              .trim()
+              .toLowerCase() ===
+            String(playerName || "")
+              .trim()
+              .toLowerCase(),
+        );
+
+      const player1FinalEntry = findFinalEntryForPlayer(match.player1.name);
+      const player2FinalEntry = findFinalEntryForPlayer(match.player2.name);
+
+      const legs1 =
+        Number(score1.legs || 0) > 0
+          ? Number(score1.legs || 0)
+          : Number(player1FinalEntry?.stats?.legsWon || 0);
+
+      const legs2 =
+        Number(score2.legs || 0) > 0
+          ? Number(score2.legs || 0)
+          : Number(player2FinalEntry?.stats?.legsWon || 0);
+
+      player1Stats.legsWon += legs1;
+      player1Stats.legsLost += legs2;
+      player2Stats.legsWon += legs2;
+      player2Stats.legsLost += legs1;
 
       player1Stats.setsWon += score1.sets;
       player1Stats.setsLost += score2.sets;
       player2Stats.setsWon += score2.sets;
       player2Stats.setsLost += score1.sets;
-
-      const finalEntries = Array.isArray(match.finalPlayerStats) ? match.finalPlayerStats : [];
 
       for (const entry of finalEntries) {
         const playerKey = String(entry?.name || "")
@@ -408,6 +491,20 @@ export class TournamentDB {
         if (hasThrownDarts) {
           target.totalAverageSum += normalizedStats.average || 0;
           target.averageCount += 1;
+          target.dartsThrown += normalizedStats.dartsThrown || 0;
+        }
+
+        if (this.isCricketStats(entry.stats)) {
+          target.totalMprSum += normalizedStats.mpr || 0;
+          target.mprCount += 1;
+          target.totalFirst9MprSum += normalizedStats.first9MPR || 0;
+          target.first9MprCount += 1;
+          target.mark5 += normalizedStats.mark5 || 0;
+          target.mark6 += normalizedStats.mark6 || 0;
+          target.mark7 += normalizedStats.mark7 || 0;
+          target.mark8 += normalizedStats.mark8 || 0;
+          target.mark9 += normalizedStats.mark9 || 0;
+          target.whiteHorse += normalizedStats.whiteHorse || 0;
         }
 
         target.plus60 += normalizedStats.plus60 || 0;
@@ -426,13 +523,14 @@ export class TournamentDB {
     }
 
     for (const stats of playerStatsMap.values()) {
-      stats.average =
-        stats.averageCount > 0 ? stats.totalAverageSum / stats.averageCount : 0;
+      stats.average = stats.averageCount > 0 ? stats.totalAverageSum / stats.averageCount : 0;
 
       stats.checkoutPercent =
-        stats.totalCheckouts > 0
-          ? (stats.totalCheckoutsHit / stats.totalCheckouts) * 100
-          : 0;
+        stats.totalCheckouts > 0 ? (stats.totalCheckoutsHit / stats.totalCheckouts) * 100 : 0;
+
+      stats.mpr = stats.mprCount > 0 ? stats.totalMprSum / stats.mprCount : 0;
+      stats.first9MPR =
+        stats.first9MprCount > 0 ? stats.totalFirst9MprSum / stats.first9MprCount : 0;
     }
 
     return playerStatsMap;
@@ -441,9 +539,13 @@ export class TournamentDB {
   async recalculatePlayerStatsFromMatches(tournamentId) {
     if (!tournamentId) return;
 
+    const tournament = await this.getTournamentById(tournamentId);
+    const tournamentType = this.resolveTournamentType(tournament);
     const players = await this.getPlayersByTournamentId(tournamentId);
     const matches = await this.getMatchesByTournamentId(tournamentId);
     const playerStatsMap = this.buildPlayerStatsFromMatches(matches, players);
+    const storedDefaults = this.getStoredPlayerStatsDefaults(tournamentType);
+    const irrelevantStatsCleanup = this.getIrrelevantPlayerStatsCleanup(tournamentType);
 
     await Promise.all(
       players.map((player) => {
@@ -456,8 +558,39 @@ export class TournamentDB {
           ...DEFAULT_PLAYER_STATS,
         };
 
+        const relevantStats =
+          tournamentType === "Cricket"
+            ? {
+                totalMprSum: nextStats.totalMprSum || 0,
+                mprCount: nextStats.mprCount || 0,
+                mpr: nextStats.mpr || 0,
+                totalFirst9MprSum: nextStats.totalFirst9MprSum || 0,
+                first9MprCount: nextStats.first9MprCount || 0,
+                first9MPR: nextStats.first9MPR || 0,
+                mark5: nextStats.mark5 || 0,
+                mark6: nextStats.mark6 || 0,
+                mark7: nextStats.mark7 || 0,
+                mark8: nextStats.mark8 || 0,
+                mark9: nextStats.mark9 || 0,
+                whiteHorse: nextStats.whiteHorse || 0,
+              }
+            : {
+                totalAverageSum: nextStats.totalAverageSum || 0,
+                averageCount: nextStats.averageCount || 0,
+                average: nextStats.average || 0,
+                totalCheckoutsHit: nextStats.totalCheckoutsHit || 0,
+                totalCheckouts: nextStats.totalCheckouts || 0,
+                checkoutPercent: nextStats.checkoutPercent || 0,
+                plus60: nextStats.plus60 || 0,
+                plus100: nextStats.plus100 || 0,
+                plus140: nextStats.plus140 || 0,
+                plus170Or180: nextStats.plus170Or180 || 0,
+                bestCheckout: nextStats.bestCheckout || 0,
+              };
+
         return updateDoc(this.tDoc(tournamentId, "players", player.id), {
-          ...DEFAULT_PLAYER_STATS,
+          ...irrelevantStatsCleanup,
+          ...storedDefaults,
           matchesPlayed: nextStats.matchesPlayed || 0,
           wins: nextStats.wins || 0,
           losses: nextStats.losses || 0,
@@ -465,17 +598,8 @@ export class TournamentDB {
           legsLost: nextStats.legsLost || 0,
           setsWon: nextStats.setsWon || 0,
           setsLost: nextStats.setsLost || 0,
-          totalAverageSum: nextStats.totalAverageSum || 0,
-          averageCount: nextStats.averageCount || 0,
-          average: nextStats.average || 0,
-          totalCheckoutsHit: nextStats.totalCheckoutsHit || 0,
-          totalCheckouts: nextStats.totalCheckouts || 0,
-          checkoutPercent: nextStats.checkoutPercent || 0,
-          plus60: nextStats.plus60 || 0,
-          plus100: nextStats.plus100 || 0,
-          plus140: nextStats.plus140 || 0,
-          plus170Or180: nextStats.plus170Or180 || 0,
-          bestCheckout: nextStats.bestCheckout || 0,
+          dartsThrown: nextStats.dartsThrown || 0,
+          ...relevantStats,
           liveAverage: 0,
           lastStatsUpdateAt: new Date(),
         });
@@ -698,14 +822,20 @@ export class TournamentDB {
         dependent.player1?.type === "match" &&
         String(dependent.player1.ref) === String(sourceMatchNumber)
       ) {
-        updates.player1 = this.createMatchRef(sourceMatchNumber, dependent.player1?.source || "winner");
+        updates.player1 = this.createMatchRef(
+          sourceMatchNumber,
+          dependent.player1?.source || "winner",
+        );
       }
 
       if (
         dependent.player2?.type === "match" &&
         String(dependent.player2.ref) === String(sourceMatchNumber)
       ) {
-        updates.player2 = this.createMatchRef(sourceMatchNumber, dependent.player2?.source || "winner");
+        updates.player2 = this.createMatchRef(
+          sourceMatchNumber,
+          dependent.player2?.source || "winner",
+        );
       }
 
       await updateDoc(this.tDoc(tournamentId, "matches", dependent.id), updates);
@@ -719,7 +849,7 @@ export class TournamentDB {
     }
   }
 
-  async resetMatchAndDescendants(tournamentId, matchId,preserveStats=false) {
+  async resetMatchAndDescendants(tournamentId, matchId, preserveStats = false) {
     if (!tournamentId || !matchId) return;
 
     const matches = await this.getMatchesByTournamentId(tournamentId);
@@ -766,14 +896,16 @@ export class TournamentDB {
 
       if (
         propagatedPlayer1 &&
-        this.buildPlayerSignature(propagatedPlayer1) !== this.buildPlayerSignature(currentMatch.player1)
+        this.buildPlayerSignature(propagatedPlayer1) !==
+          this.buildPlayerSignature(currentMatch.player1)
       ) {
         updates.player1 = propagatedPlayer1;
       }
 
       if (
         propagatedPlayer2 &&
-        this.buildPlayerSignature(propagatedPlayer2) !== this.buildPlayerSignature(currentMatch.player2)
+        this.buildPlayerSignature(propagatedPlayer2) !==
+          this.buildPlayerSignature(currentMatch.player2)
       ) {
         updates.player2 = propagatedPlayer2;
       }
@@ -1007,14 +1139,17 @@ export class TournamentDB {
   // =========================
   // 🧑 PLAYERS
   // =========================
-  async createPlayers(tournamentId, players) {
+  async createPlayers(tournamentId, players, tournamentSettings = null) {
+    const tournamentType = this.resolveTournamentType(tournamentSettings);
+    const storedDefaults = this.getStoredPlayerStatsDefaults(tournamentType);
+
     return Promise.all(
       players.map(async (player) => {
         const name = typeof player === "object" ? player.name : player;
 
         const ref = await addDoc(this.tRef(tournamentId, "players"), {
           name,
-          ...DEFAULT_PLAYER_STATS,
+          ...storedDefaults,
         });
 
         return { id: ref.id, name };
@@ -1022,7 +1157,9 @@ export class TournamentDB {
     );
   }
 
-  async createPlayersGroups(tournamentId, groups) {
+  async createPlayersGroups(tournamentId, groups, tournamentSettings = null) {
+    const tournamentType = this.resolveTournamentType(tournamentSettings);
+    const storedDefaults = this.getStoredPlayerStatsDefaults(tournamentType);
     const allPlayers = groups.flatMap((group) =>
       group.players.map((player) => ({
         name: player,
@@ -1035,7 +1172,7 @@ export class TournamentDB {
         const ref = await addDoc(this.tRef(tournamentId, "players"), {
           name: p.name,
           groupId: p.groupId,
-          ...DEFAULT_PLAYER_STATS,
+          ...storedDefaults,
         });
 
         return { id: ref.id, ...p };
@@ -1244,7 +1381,7 @@ export class TournamentDB {
   ) {
     if (!tournamentId || !matchId || !winner) return;
 
-    await this.resetMatchAndDescendants(tournamentId, matchId,true);
+    await this.resetMatchAndDescendants(tournamentId, matchId, true);
 
     const ref = this.tDoc(tournamentId, "matches", matchId);
 
