@@ -36,6 +36,7 @@ const SETS_OPTIONS = [2, 3, 4, 5, 6, 7];
 const LEGS_OF_SET_OPTIONS = [2, 3];
 const TOURNAMENT_TYPE_OPTIONS = ["X01", "Cricket"];
 const CRICKET_SCORING_OPTIONS = ["Standard", "Cut Throat", "No Score"];
+const CRICKET_GAME_MODE_OPTIONS = ["Cricket", "Tactics"];
 
 const DEFAULT_TOURNAMENT_TYPE = "X01";
 const DEFAULT_CRICKET_SETTINGS = {
@@ -128,6 +129,7 @@ const DEFAULT_MATCH_SETTINGS = {
   sets: 3,
   legsOfSet: 3,
   scoringMode: "Standard",
+  cricketGameMode: "Cricket",
 };
 const DEFAULT_TOURNAMENT_FORMAT = {
   groupSize: 4,
@@ -156,6 +158,9 @@ function extractMatchSettings(settings = {}) {
     sets: Number(settings?.sets) || DEFAULT_MATCH_SETTINGS.sets,
     legsOfSet: Number(settings?.legsOfSet) || DEFAULT_MATCH_SETTINGS.legsOfSet,
     scoringMode: settings?.scoringMode || DEFAULT_MATCH_SETTINGS.scoringMode,
+    cricketGameMode:
+      settings?.cricketGameMode ||
+      DEFAULT_MATCH_SETTINGS.cricketGameMode,
   };
 }
 
@@ -203,6 +208,11 @@ function buildTournamentSettingsPayload(
     variant: normalizedGlobal.tournamentType,
     defaultMatchSettings: normalizedGlobal,
     tournamentFormat: normalizedFormat,
+    ...(normalizedGlobal.tournamentType === "Cricket"
+      ? {
+          cricketGameMode: normalizedGlobal.cricketGameMode,
+        }
+      : {}),
   };
 
   if (Object.keys(normalizedRoundSettings).length > 0) {
@@ -228,7 +238,8 @@ function areMatchSettingsEqual(a = {}, b = {}) {
     left.legs === right.legs &&
     left.sets === right.sets &&
     left.legsOfSet === right.legsOfSet &&
-    left.scoringMode === right.scoringMode
+    left.scoringMode === right.scoringMode &&
+    left.cricketGameMode === right.cricketGameMode
   );
 }
 
@@ -274,10 +285,20 @@ function getDisplayName(player) {
 function getMatchTitle(match, labelPrefix = "") {
   if (!match) return "Spiel";
 
-  const matchNumberLabel = `${labelPrefix || "Spiel"} ${match.matchNumber}`;
   const roundName = String(match.displayRoundName || "").trim();
+  const matchNumber = String(match.matchNumber || "").trim();
+
+  const isGroupMatch = /^[A-Z]-\d+$/i.test(matchNumber);
+  const isGroupRound = /^Gruppe\s+[A-Z]$/i.test(roundName);
+
+  const matchNumberLabel = `${labelPrefix || "Spiel"} ${matchNumber}`;
 
   if (!roundName) {
+    return matchNumberLabel;
+  }
+
+  // Bei Gruppenspielen nur "Spiel A-1"
+  if (isGroupMatch && isGroupRound) {
     return matchNumberLabel;
   }
 
@@ -304,15 +325,17 @@ function getTournamentTypeLabel(value) {
   return value === "Cricket" ? "Cricket" : "X01";
 }
 
-function getFinalStatsColumns(tournamentType = DEFAULT_TOURNAMENT_TYPE) {
+function getFinalStatsColumns(matchMode,tournamentType = DEFAULT_TOURNAMENT_TYPE) {
   if (tournamentType === "Cricket") {
     return [
       { header: "Platz", key: "place", width: 8 },
       { header: "Spieler", key: "name", width: 20 },
       { header: "Siege", key: "wins", width: 10 },
       { header: "Niederlagen", key: "losses", width: 12 },
+             ...(matchMode === "Sets"
+    ? [{ header: "Sets", key: "sets", width: 12 }]
+    : []),
       { header: "Legs", key: "legs", width: 12 },
-      { header: "Sets", key: "sets", width: 12 },
       { header: "MPR", key: "mpr", width: 10 },
       { header: "First 9 MPR", key: "first9Mpr", width: 14 },
       { header: "5 Mark", key: "mark5", width: 10 },
@@ -321,7 +344,6 @@ function getFinalStatsColumns(tournamentType = DEFAULT_TOURNAMENT_TYPE) {
       { header: "8 Mark", key: "mark8", width: 10 },
       { header: "9 Mark", key: "mark9", width: 10 },
       { header: "White Horse", key: "whiteHorse", width: 14 },
-      { header: "Darts", key: "dartsThrown", width: 10 },
     ];
   }
 
@@ -342,14 +364,16 @@ function getFinalStatsColumns(tournamentType = DEFAULT_TOURNAMENT_TYPE) {
   ];
 }
 
-function getFinalStatsRow(player, index, tournamentType = DEFAULT_TOURNAMENT_TYPE) {
+function getFinalStatsRow(player, index,matchMode, tournamentType = DEFAULT_TOURNAMENT_TYPE) {
   const row = {
     place: player.finalPlace ?? index + 1,
     name: player.name,
     wins: Number(player.wins || 0),
     losses: Number(player.losses || 0),
+ ...(matchMode === "Sets"
+    ? { sets: `${player.setsWon || 0}:${player.setsLost || 0}` }
+    : {}),
     legs: `${player.legsWon || 0}:${player.legsLost || 0}`,
-    sets: `${player.setsWon || 0}:${player.setsLost || 0}`,
   };
 
   if (tournamentType === "Cricket") {
@@ -363,7 +387,6 @@ function getFinalStatsRow(player, index, tournamentType = DEFAULT_TOURNAMENT_TYP
       mark8: Number(player.mark8 || 0),
       mark9: Number(player.mark9 || 0),
       whiteHorse: Number(player.whiteHorse || 0),
-      dartsThrown: Number(player.dartsThrown || 0),
     };
   }
 
@@ -937,7 +960,7 @@ function CollapsibleSection({
     <div className={`collapsible-section ${className} ${isOpen ? "is-open" : "is-closed"}`.trim()}>
       <button type="button" className="collapse-toggle" onClick={() => setIsOpen((prev) => !prev)}>
         <div className="collapse-toggle-left">
-          <span className={`collapse-chevron ${isOpen ? "open" : ""}`}>⌄</span>
+          <span className={`collapse-chevron ${isOpen ? "open" : ""}`}>▾</span>
           <div className="collapse-title-wrap">
             <strong>{title}</strong>
             {subtitle && <span className="section-subtitle">{subtitle}</span>}
@@ -970,7 +993,7 @@ function RoundSection({ title, subtitle, badge, defaultOpen = false, actions = n
         onClick={() => setIsOpen((prev) => !prev)}
       >
         <div className="round-section-toggle-left">
-          <span className={`round-section-chevron ${isOpen ? "open" : ""}`}>⌄</span>
+          <span className={`round-section-chevron ${isOpen ? "open" : ""}`}>▾</span>
           <div className="round-section-title-wrap">
             <strong>{title}</strong>
             {subtitle ? <span className="round-section-subtitle">{subtitle}</span> : null}
@@ -988,7 +1011,7 @@ function RoundSection({ title, subtitle, badge, defaultOpen = false, actions = n
   );
 }
 
-function GroupStandingsTable({ standings, qualifiedPerGroup }) {
+function GroupStandingsTable({ standings, qualifiedPerGroup,matchMode }) {
   if (!standings?.length) return null;
 
   return (
@@ -1008,7 +1031,8 @@ function GroupStandingsTable({ standings, qualifiedPerGroup }) {
               <th>S</th>
               <th>N</th>
               <th>Pkte</th>
-              <th>Legs</th>
+              {matchMode === "Legs" && (<th>Legs</th>)}
+              {matchMode === "Sets" && (<th>Sets</th>)}
               <th>Diff</th>
             </tr>
           </thead>
@@ -1026,10 +1050,15 @@ function GroupStandingsTable({ standings, qualifiedPerGroup }) {
                 <td>{entry.wins}</td>
                 <td>{entry.losses}</td>
                 <td>{entry.points}</td>
-                <td>
+                {matchMode === "Sets" ?(<><td>
                   {entry.legsWon}:{entry.legsLost}
                 </td>
-                <td>{entry.legDiff > 0 ? `+${entry.legDiff}` : entry.legDiff}</td>
+                <td>{entry.legDiff > 0 ? `+${entry.legDiff}` : entry.legDiff}</td></>):
+                (<><td>
+                  {entry.setsWon}:{entry.setsLost}
+                </td>
+                <td>{entry.setDiff > 0 ? `+${entry.setDiff}` : entry.setDiff}</td></>)
+                }
               </tr>
             ))}
           </tbody>
@@ -1339,15 +1368,15 @@ function buildFinalPlacements(matches = [], players = []) {
     });
 }
 
-function FinalStandingsTable({ matches, players, tournamentName, tournamentType }) {
+function FinalStandingsTable({ matches, players, tournamentName, tournamentType,matchMode }) {
   async function exportToExcel() {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Ergebnisse");
 
-    worksheet.columns = getFinalStatsColumns(tournamentType);
+    worksheet.columns = getFinalStatsColumns(matchMode,tournamentType);
 
     sortedPlayers.forEach((player, index) => {
-      worksheet.addRow(getFinalStatsRow(player, index, tournamentType));
+      worksheet.addRow(getFinalStatsRow(player, index,matchMode, tournamentType));
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -1409,7 +1438,7 @@ function FinalStandingsTable({ matches, players, tournamentName, tournamentType 
           <table className="final-standings-table">
             <thead>
               <tr>
-                {getFinalStatsColumns(tournamentType).map((column) => (
+                {getFinalStatsColumns(matchMode,tournamentType).map((column) => (
                   <th key={column.key}>{column.header}</th>
                 ))}
               </tr>
@@ -1429,12 +1458,14 @@ function FinalStandingsTable({ matches, players, tournamentName, tournamentType 
                     <td className={cx("final-standings-stat", highlightClass)}>
                       {Number(player.losses || 0)}
                     </td>
+                     {matchMode === "Sets" && (<td className={cx("final-standings-stat", highlightClass)}>
+                      {Number(player.setsWon || 0)} / {Number(player.setsLost || 0)}
+                    </td>)}
                     <td className={cx("final-standings-stat", highlightClass)}>
                       {Number(player.legsWon || 0)} / {Number(player.legsLost || 0)}
                     </td>
-                    <td className={cx("final-standings-stat", highlightClass)}>
-                      {Number(player.setsWon || 0)} / {Number(player.setsLost || 0)}
-                    </td>
+                   
+                    
                     {tournamentType === "Cricket" ? (
                       <>
                         <td className={cx("final-standings-stat", highlightClass)}>
@@ -1460,9 +1491,6 @@ function FinalStandingsTable({ matches, players, tournamentName, tournamentType 
                         </td>
                         <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.whiteHorse || 0)}
-                        </td>
-                        <td className={cx("final-standings-stat", highlightClass)}>
-                          {Number(player.dartsThrown || 0)}
                         </td>
                       </>
                     ) : (
@@ -1589,6 +1617,7 @@ function TournamentTree({
                       <GroupStandingsTable
                         standings={groupTable.standings}
                         qualifiedPerGroup={qualifiedPerGroup}
+                        matchMode={matchMode}
                       />
 
                       <div className="group-match-grid">
@@ -1693,6 +1722,7 @@ export default function TournamentApp() {
   const [bullMode, setBullMode] = useState("25/50");
   const [bullOffMode, setBullOffMode] = useState("Normal");
   const [scoringMode, setScoringMode] = useState("Standard");
+  const [cricketGameMode, setCricketGameMode] = useState(DEFAULT_CRICKET_SETTINGS.cricketGameMode);
   const [matchMode, setMatchMode] = useState("Legs");
   const [legs, setLegs] = useState(3);
   const [sets, setSets] = useState(3);
@@ -1745,6 +1775,7 @@ export default function TournamentApp() {
       bullMode,
       bullOffMode,
       scoringMode,
+      cricketGameMode,
       matchMode,
       legs,
       sets,
@@ -1759,6 +1790,7 @@ export default function TournamentApp() {
       bullMode,
       bullOffMode,
       scoringMode,
+      cricketGameMode,
       matchMode,
       legs,
       sets,
@@ -1815,6 +1847,7 @@ export default function TournamentApp() {
     setBullMode(globalSettings.bullMode);
     setBullOffMode(globalSettings.bullOffMode);
     setScoringMode(globalSettings.scoringMode || DEFAULT_MATCH_SETTINGS.scoringMode);
+    setCricketGameMode(globalSettings.cricketGameMode || DEFAULT_CRICKET_SETTINGS.cricketGameMode);
     setMatchMode(globalSettings.matchMode);
     setLegs(globalSettings.legs);
     setSets(globalSettings.sets);
@@ -2202,6 +2235,7 @@ export default function TournamentApp() {
         bullMode: effectiveSettings.bullMode,
         bullOffMode: effectiveSettings.bullOffMode,
         scoringMode: effectiveSettings.scoringMode,
+        cricketGameMode: effectiveSettings.cricketGameMode,
         maxRounds: effectiveSettings.maxRounds,
         legs:
           effectiveSettings.matchMode === "Legs"
@@ -2554,12 +2588,23 @@ export default function TournamentApp() {
             <div className="config-sections">
               <div className="config-card">
                 <div className="config-card-title">Allgemein</div>
-                <div className="grid">
+                <div className="grid3">
                   <div className="field">
                     <label>Turniermodus</label>
                     <select value={mode} onChange={(e) => setMode(e.target.value)}>
                       <option value="KO">KO</option>
                       <option value="GROUP_KO">Gruppen + KO</option>
+                    </select>
+                  </div>
+
+                   <div className="field">
+                    <label>Platzierungsspiele</label>
+                    <select
+                      value={playAllPlaces ? "all" : "top_only"}
+                      onChange={(e) => setPlayAllPlaces(e.target.value === "all")}
+                    >
+                      <option value="top_only">Nur Siegerbaum</option>
+                      <option value="all">Alle KO-Plätze ausspielen</option>
                     </select>
                   </div>
 
@@ -2575,6 +2620,7 @@ export default function TournamentApp() {
                           setMaxRounds(DEFAULT_CRICKET_SETTINGS.maxRounds);
                           setLegs(DEFAULT_CRICKET_SETTINGS.legs);
                           setScoringMode(DEFAULT_CRICKET_SETTINGS.scoringMode);
+                          setCricketGameMode(DEFAULT_CRICKET_SETTINGS.cricketGameMode);
                         } else {
                           setBullOffMode(DEFAULT_MATCH_SETTINGS.bullOffMode);
                         }
@@ -2587,17 +2633,6 @@ export default function TournamentApp() {
                       ))}
                     </select>
                   </div>
-
-                  <div className="field">
-                    <label>Platzierungsspiele</label>
-                    <select
-                      value={playAllPlaces ? "all" : "top_only"}
-                      onChange={(e) => setPlayAllPlaces(e.target.value === "all")}
-                    >
-                      <option value="top_only">Nur Siegerbaum</option>
-                      <option value="all">Alle KO-Plätze ausspielen</option>
-                    </select>
-                  </div>
                 </div>
               </div>
 
@@ -2606,6 +2641,17 @@ export default function TournamentApp() {
                 <div className="grid">
                   {tournamentType === "Cricket" ? (
                     <>
+                      <div className="field">
+                        <label>Game Mode</label>
+                        <select value={cricketGameMode} onChange={(e) => setCricketGameMode(e.target.value)}>
+                          {CRICKET_GAME_MODE_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
                       <div className="field">
                         <label>Scoring</label>
                         <select value={scoringMode} onChange={(e) => setScoringMode(e.target.value)}>
@@ -2965,6 +3011,7 @@ export default function TournamentApp() {
           players={playerDocs}
           tournamentName={tournamentName}
           tournamentType={tournamentType}
+          matchMode={matchMode}
         />
       </div>
     </div>
@@ -3193,6 +3240,22 @@ export default function TournamentApp() {
                 <div className="grid">
                   {roundSettingsDraft.tournamentType === "Cricket" ? (
                     <>
+                      <div className="field">
+                        <label>Game Mode</label>
+                        <select
+                          value={roundSettingsDraft.cricketGameMode}
+                          onChange={(e) =>
+                            setRoundSettingsDraft((prev) => ({ ...prev, cricketGameMode: e.target.value }))
+                          }
+                        >
+                          {CRICKET_GAME_MODE_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
                       <div className="field">
                         <label>Scoring</label>
                         <select

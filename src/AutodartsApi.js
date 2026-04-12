@@ -217,7 +217,7 @@ export class AutodartsApi {
       settings:
         tournamentType === "Cricket"
           ? {
-              gameMode: "Cricket",
+              gameMode: config.cricketGameMode ?? "Cricket",
               scoringMode: config.scoringMode ?? "Standard",
               maxRounds: config.maxRounds ?? 50,
             }
