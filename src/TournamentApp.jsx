@@ -49,7 +49,60 @@ const DEFAULT_CRICKET_SETTINGS = {
   sets: 3,
   legsOfSet: 3,
 };
-
+/*
+const DEFAULT_PLAYERS = [
+  "Anna",
+  "Bernd",
+  "Christian",
+  "Doris",
+  "Erika",
+  "Frank",
+  "Gabi",
+  "Hans",
+  "Ingrid",
+  "Jürgen",
+  "Karin",
+  "Lars",
+  "Monika",
+  "Norbert",
+  "Olga",
+  "Peter",
+  "Petra",
+  "Ralf",
+  "Sabine",
+  "Thomas",
+  "Ursula",
+  "Volker",
+  "Waltraud",
+  "Xaver",
+  "Yvonne",
+  "Zoe",
+  "Alexander",
+  "Beate",
+  "Claus",
+  "Diana",
+  "Erich",
+  "Frieda",
+  "Gerhard",
+  "Hilde",
+  "Igor",
+  "Jutta",
+  "Karl",
+  "Lisa",
+  "Manfred",
+  "Nina",
+  "Otto",
+  "Paula",
+  "Quirin",
+  "Renate",
+  "Stefan",
+  "Tanja",
+  "Uwe",
+  "Verena",
+  "Wolfgang",
+  "Yasin",
+];
+*/
 const DEFAULT_PLAYERS = [
   "Anna",
   "Bernd",
@@ -248,7 +301,7 @@ function getMatchTitle(match, labelPrefix = "") {
     return matchNumberLabel;
   }
 
-  // 👉 Erste KO Runde → nur "Spiel X"
+  // 👉 NEU: Erste KO Runde → nur "Spiel X"
   if (
     match.bracketType === "main" && // KO Baum
     Number(match.round) === 1       // erste Runde
@@ -293,8 +346,8 @@ function getFinalStatsColumns(matchMode,tournamentType = DEFAULT_TOURNAMENT_TYPE
       { header: "Niederlagen", key: "losses", width: 12 },
              ...(matchMode === "Sets"
     ? [{ header: "Sets", key: "sets", width: 12 }]
-    : [ { header: "Legs", key: "legs", width: 12 },]),
-     
+    : []),
+      { header: "Legs", key: "legs", width: 12 },
       { header: "MPR", key: "mpr", width: 10 },
       { header: "First 9 MPR", key: "first9Mpr", width: 14 },
       { header: "5 Mark", key: "mark5", width: 10 },
@@ -311,9 +364,8 @@ function getFinalStatsColumns(matchMode,tournamentType = DEFAULT_TOURNAMENT_TYPE
     { header: "Spieler", key: "name", width: 20 },
     { header: "Siege", key: "wins", width: 10 },
     { header: "Niederlagen", key: "losses", width: 12 },
-    ...(matchMode === "Sets"
-    ? [{ header: "Sets", key: "sets", width: 12 }]
-    : [ { header: "Legs", key: "legs", width: 12 },]),
+    { header: "Legs", key: "legs", width: 12 },
+    { header: "Sets", key: "sets", width: 12 },
     { header: "Average", key: "avg", width: 10 },
     { header: "Checkout %", key: "co", width: 12 },
     { header: "60+", key: "p60", width: 8 },
@@ -1451,73 +1503,74 @@ function FinalStandingsTable({ matches, players, tournamentName, tournamentType,
             <tbody>
               {sortedPlayers.map((player, index) => {
                 const rank = player.finalPlace ?? index + 1;
+                const highlightClass = rank <= 3 ? "is-highlighted" : "";
 
                 return (
                   <tr key={player.id || player.name}>
                     <td className="final-standings-rank">{rank}</td>
                     <td className="final-standings-player">{player.name}</td>
-                    <td className={cx("final-standings-stat", )}>
+                    <td className={cx("final-standings-stat", highlightClass)}>
                       {Number(player.wins || 0)}
                     </td>
-                    <td className={cx("final-standings-stat", )}>
+                    <td className={cx("final-standings-stat", highlightClass)}>
                       {Number(player.losses || 0)}
                     </td>
-                     {matchMode === "Sets" ? (<td className={cx("final-standings-stat", )}>
+                     {matchMode === "Sets" && (<td className={cx("final-standings-stat", highlightClass)}>
                       {Number(player.setsWon || 0)} / {Number(player.setsLost || 0)}
-                    </td>):
-                    <td className={cx("final-standings-stat", )}>
+                    </td>)}
+                    <td className={cx("final-standings-stat", highlightClass)}>
                       {Number(player.legsWon || 0)} / {Number(player.legsLost || 0)}
-                    </td>}
+                    </td>
                    
                     
                     {tournamentType === "Cricket" ? (
                       <>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {formatStatValue(player.mpr, 2)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {formatStatValue(player.first9MPR, 2)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.mark5 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.mark6 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.mark7 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.mark8 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.mark9 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.whiteHorse || 0)}
                         </td>
                       </>
                     ) : (
                       <>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {formatStatValue(player.average, 1)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {formatStatValue(player.checkoutPercent, 1)}%
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.plus60 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.plus100 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.plus140 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.plus170Or180 || 0)}
                         </td>
-                        <td className={cx("final-standings-stat", )}>
+                        <td className={cx("final-standings-stat", highlightClass)}>
                           {Number(player.bestCheckout || 0)}
                         </td>
                       </>
@@ -2427,14 +2480,23 @@ export default function TournamentApp() {
           try {
             stats = await autodartsApi.getMatchStats(match.lobbyId);
           } catch (error) {
-             if (error?.code === "TOKEN_REFRESH_REQUIRED") {
-               throw error;
-             }
-             console.warn("Stats beim Abbrechen konnten nicht geladen werden", error);
+            if (match?.lobbyId) {
+              try {
+                stats = await autodartsApi.getMatchStats(match.lobbyId);
+              } catch (error) {
+                if (error?.code === "TOKEN_REFRESH_REQUIRED") {
+                  throw error;
+                }
+
+                console.warn("Stats beim Abbrechen konnten nicht geladen werden", error);
+              }
+            }
           }
         } else {
-          console.log("Keine Lobby ID vorhanden beim Abbrechen.");
+          console.log("keine lobby id");
         }
+
+        console.log(stats);
 
         const watcherKey = `${tournamentId}:${match.id}`;
         cancelledMatchWatchers.add(watcherKey);

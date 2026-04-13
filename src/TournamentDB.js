@@ -370,6 +370,7 @@ export class TournamentDB {
     return null;
   }
 
+
   shouldPreserveResolvedMatch(currentMatch = null) {
     if (!currentMatch || String(currentMatch.status || "") !== "finished") {
       return false;
@@ -809,6 +810,40 @@ export class TournamentDB {
       visited.add(dependent.id);
 
       const updates = { ...this.clearMatchResultFields() };
+
+      if (
+        dependent.player1?.type === "player" &&
+        String(dependent.player1?.qualifierRef || "") === ""
+      ) {
+        if (String(dependent.player1?.name || "") === String(dependent.winner?.name || "")) {
+          // absichtlich nichts extra
+        }
+      }
+
+      if (
+        dependent.player1?.type === "player" &&
+        String(dependent.player1?.qualifierRef || "") === "" &&
+        String(dependent.player1?.id || "") !== "" &&
+        String(dependent.player1?.id || "") === String(dependent.player1?.id || "")
+      ) {
+        // noop, nur um keine zu aggressive Rücksetzung auf Nicht-Referenz-Slots zu machen
+      }
+
+      if (
+        dependent.player1?.type === "player" &&
+        String(dependent.player1?.qualifierRef || "") &&
+        false
+      ) {
+        // noop
+      }
+
+      if (
+        dependent.player1?.type === "player" &&
+        String(dependent.player1?.qualifierRef || "") === "" &&
+        String(dependent.player1?.name || "") !== ""
+      ) {
+        // noop
+      }
 
       if (
         dependent.player1?.type === "match" &&
@@ -1601,4 +1636,8 @@ export class TournamentDB {
     const q = query(this.tRef(tournamentId, "players"), orderBy("points", "desc"));
     return onSnapshot(q, (snap) => cb(this.mapSnap(snap)));
   }
+
+  // =========================
+  // 📊 STATS
+  // =========================
 }
