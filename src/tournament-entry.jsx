@@ -13,7 +13,7 @@ function injectCSS() {
   link.rel = "stylesheet";
   link.href = chrome.runtime.getURL("tournament.css");
 
-  document.head.appendChild(link);
+  (document.head || document.documentElement).appendChild(link);
 }
 
 // 🔥 React App mounten

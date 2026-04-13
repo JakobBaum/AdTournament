@@ -1,3 +1,5 @@
+import toast from "./toast";
+
 const TOKEN_STORAGE_KEY = "AdTournamentExtensionBearerToken";
 const TOKEN_SAVED_AT_KEY = "AdTournamentExtensionBearerTokenSavedAT";
 
@@ -88,11 +90,11 @@ export class AutodartsApi {
     return error;
   }
 
-  showReloadAlert(message = "Dein Login ist nicht mehr gültig. Bitte lade die Seite neu.") {
+  showReloadAlert(message = "Dein Login ist nicht mehr gültig\nBitte lade die Seite neu") {
     if (window.__adTourneyReloadAlertShown) return;
 
     window.__adTourneyReloadAlertShown = true;
-    alert(message);
+    toast.error(message, { id: "ad-reload-alert" });
   }
 
   async getBearerToken() {
