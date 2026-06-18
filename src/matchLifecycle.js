@@ -51,7 +51,14 @@ export function extractMatchResultFromStats(stats, match) {
     return Number(value || 0);
   };
 
-  const player1Wins = compareScoreValue(scorePlayer1) >= compareScoreValue(scorePlayer2);
+  const score1 = compareScoreValue(scorePlayer1);
+  const score2 = compareScoreValue(scorePlayer2);
+
+  if (score1 === score2) {
+    return { winner: null, loser: null, scorePlayer1, scorePlayer2 };
+  }
+
+  const player1Wins = score1 > score2;
 
   return {
     winner: player1Wins ? match?.player1 ?? null : match?.player2 ?? null,

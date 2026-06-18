@@ -99,17 +99,12 @@ export class AutodartsApi {
 
 
   scheduleReload(message = "Dein Login ist abgelaufen. Die Seite wird neu geladen.") {
-    try {
-      if (window.__adTourneyReloadScheduled) return;
-      window.__adTourneyReloadScheduled = true;
-      this.showReloadAlert(message);
-      window.sessionStorage.setItem('adTournamentTokenReloadPending', '1');
-      window.setTimeout(() => {
-        window.location.reload();
-      }, 1200);
-    } catch {
-      // ignore
-    }
+    if (window.__adTourneyReloadScheduled) return;
+    window.__adTourneyReloadScheduled = true;
+    this.showReloadAlert(message);
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 1200);
   }
 
   async getBearerToken() {
@@ -191,17 +186,19 @@ export class AutodartsApi {
     if (!response.ok) {
       const errorText =
         typeof body === "string" ? body : JSON.stringify(body || {});
-      const normalizedErrorText = String(errorText || "").toLowerCase();
 
       if (response.status === 401) {
-        // Wait for the SPA to silently refresh the token before reloading
+        // Wait for the SPA to silently refresh the token before reloading.
+        // If the token was refreshed, the current request still failed — fall
+        // through to the generic error so callers can retry. If no refresh
+        // arrived, schedule a page reload as a last resort.
         const refreshed = await this.waitForValidToken(8000);
         if (!refreshed) {
           this.scheduleReload("Dein Login ist nicht mehr gültig. Die Seite wird neu geladen.");
+          throw this.createReloadRequiredError(
+            "Autodarts hat den Token abgelehnt. Bitte lade die Seite neu."
+          );
         }
-        throw this.createReloadRequiredError(
-          "Autodarts hat den Token abgelehnt. Bitte lade die Seite neu."
-        );
       }
 
       const error = new Error(
@@ -219,7 +216,7 @@ export class AutodartsApi {
 
   async getBoards() {
     const data = await this.request(ENDPOINTS.boards, { method: "GET" });
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data) ? data.filter((board) => board?.state?.connected === true) : [];
   }
 
   async createLobby(config = {}) {
