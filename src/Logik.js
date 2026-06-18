@@ -99,10 +99,16 @@ buildRoundRobinMatches(groupPlayers = [], options = {}) {
     returnLegs = false,
   } = options;
 
-  const schedule = this.createRoundRobinSchedule(groupPlayers, returnLegs);
+  // Separate explicit byes (added for equal group sizes) from real players.
+  // The round-robin schedule runs on real players only — byes are never
+  // scheduled against each other and don't participate in the rotation.
+  const realGroupPlayers = groupPlayers.filter((p) => p?.type !== "bye");
+  const explicitByeCount = groupPlayers.length - realGroupPlayers.length;
+
+  const schedule = this.createRoundRobinSchedule(realGroupPlayers, returnLegs);
   let groupMatchCounter = 1;
 
-  return schedule.flatMap((pairings, roundIndex) =>
+  const realMatches = schedule.flatMap((pairings, roundIndex) =>
     pairings.map((pairing) => ({
       matchNumber: `${groupLetter}-${groupMatchCounter++}`,
       round: startRound + roundIndex,
@@ -113,6 +119,7 @@ buildRoundRobinMatches(groupPlayers = [], options = {}) {
       winner: null,
       loser: null,
       status: "pending",
+      resultSource: null,
       boardId: null,
       bracketType: "group",
       placementRangeStart: null,
@@ -121,8 +128,40 @@ buildRoundRobinMatches(groupPlayers = [], options = {}) {
       loserPlace: null,
       displayRoundName: groupName,
       placementGroupLabel: null,
-    })),
+    }))
   );
+
+  // For each explicit bye, every real player gets one auto-win match.
+  // These represent the rounds where a smaller group would have a sit-out.
+  const byeMatches = [];
+  const byeRoundStart = startRound + schedule.length;
+  for (let b = 0; b < explicitByeCount; b++) {
+    for (const player of realGroupPlayers) {
+      const bye = this.createBye();
+      byeMatches.push({
+        matchNumber: `${groupLetter}-${groupMatchCounter++}`,
+        round: byeRoundStart + b,
+        groupRound: byeRoundStart + b,
+        group: groupName,
+        player1: player,
+        player2: bye,
+        winner: player,
+        loser: bye,
+        status: "finished",
+        resultSource: "bye",
+        boardId: null,
+        bracketType: "group",
+        placementRangeStart: null,
+        placementRangeEnd: null,
+        winnerPlace: null,
+        loserPlace: null,
+        displayRoundName: groupName,
+        placementGroupLabel: null,
+      });
+    }
+  }
+
+  return [...realMatches, ...byeMatches];
 }
 
 
@@ -487,8 +526,11 @@ buildRoundRobinMatches(groupPlayers = [], options = {}) {
 
     for (let g = 0; g < groups.length; g++) {
       const groupLetter = String.fromCharCode(65 + g);
-      const playerCountInGroup = groups[g]?.players?.length || 0;
-      const actualQualifiers = Math.min(qualifiedPerGroup, playerCountInGroup);
+      // Count only real players — byes added for equal group sizes must not qualify
+      const realPlayerCount = (groups[g]?.players || []).filter(
+        (p) => p?.type === "player"
+      ).length;
+      const actualQualifiers = Math.min(qualifiedPerGroup, realPlayerCount);
 
       for (let q = 1; q <= actualQualifiers; q++) {
         qualifiers.push({
@@ -655,16 +697,27 @@ generateTournament(players, playersPerGroup = 4, qualifiedPerGroup = 2, options 
 
   const basePlayers = options.shufflePlayers === false ? [...players] : this.shuffleArray(players);
   const groups = [];
-  const numGroups = Math.ceil(basePlayers.length / playersPerGroup);
 
-  for (let g = 0; g < numGroups; g += 1) {
-    const start = g * playersPerGroup;
-    const end = start + playersPerGroup;
-    const groupLetter = String.fromCharCode(65 + g);
-    groups.push({
-      name: `Gruppe ${groupLetter}`,
-      players: basePlayers.slice(start, end),
-    });
+  if (options.allPlayersOneGroup) {
+    // Single group: all players play each other, top N qualify for KO
+    groups.push({ name: "Gruppe A", players: basePlayers });
+  } else {
+    const numGroups = Math.ceil(basePlayers.length / playersPerGroup);
+
+    for (let g = 0; g < numGroups; g += 1) {
+      const start = g * playersPerGroup;
+      const end   = start + playersPerGroup;
+      const groupLetter = String.fromCharCode(65 + g);
+      const groupPlayers = basePlayers.slice(start, end);
+
+      // Pad the last (smaller) group with byes so all groups are equal size
+      if (options.groupPhaseByes && groupPlayers.length < playersPerGroup) {
+        const needed = playersPerGroup - groupPlayers.length;
+        for (let i = 0; i < needed; i++) groupPlayers.push(this.createBye());
+      }
+
+      groups.push({ name: `Gruppe ${groupLetter}`, players: groupPlayers });
+    }
   }
 
   return this.generateTournamentFromGroups(groups, qualifiedPerGroup, options);

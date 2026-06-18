@@ -407,6 +407,127 @@ describe('GROUP_KO: all match numbers are unique across whole tournament', () =>
   });
 });
 
+// ─── allPlayersOneGroup option ────────────────────────────────────────────────
+
+describe('GROUP_KO: allPlayersOneGroup option', () => {
+  test('9 players, qualifiers=3 → 1 group of 9, 8 round-robin matches, 3 qualify', () => {
+    const { matches } = logic.generateTournament(makePlayers(9), 4, 3, {
+      shufflePlayers: false,
+      allPlayersOneGroup: true,
+    });
+    const gm = matches.filter((m) => m.group === 'Gruppe A');
+    // C(9,2) = 36 round-robin matches in one group
+    assert.equal(gm.length, 36, 'Single group of 9 → 36 round-robin matches');
+    const main = mainMatches(matches);
+    // 3 qualifiers → nextPow2(3) = 4 → 3 KO matches
+    assert.equal(main.length, 3);
+    assert.ok(getFinal(matches) !== null);
+  });
+
+  test('4 players, qualifiers=2, allPlayersOneGroup → 1 group, 6 matches, 1 final', () => {
+    const { matches } = logic.generateTournament(makePlayers(4), 4, 2, {
+      shufflePlayers: false,
+      allPlayersOneGroup: true,
+    });
+    const gm = groupMatches(matches);
+    assert.equal(gm.length, 6); // C(4,2)
+    assert.equal(mainMatches(matches).length, 1);
+    assert.ok(getFinal(matches) !== null);
+  });
+
+  test('2 players, qualifiers=2, allPlayersOneGroup → 1 group, 1 match, 1 final', () => {
+    const { matches } = logic.generateTournament(makePlayers(2), 4, 2, {
+      shufflePlayers: false,
+      allPlayersOneGroup: true,
+    });
+    assert.equal(groupMatches(matches).length, 1);
+    assert.equal(mainMatches(matches).length, 1);
+    assert.ok(getFinal(matches) !== null);
+  });
+
+  test('all group matches are pending (no byes in all-one-group mode)', () => {
+    const { matches } = logic.generateTournament(makePlayers(5), 4, 2, {
+      shufflePlayers: false,
+      allPlayersOneGroup: true,
+    });
+    const gm = groupMatches(matches);
+    assert.ok(gm.every((m) => m.status === 'pending'), 'All group matches should be pending');
+  });
+});
+
+// ─── groupPhaseByes option ────────────────────────────────────────────────────
+
+describe('GROUP_KO: groupPhaseByes option', () => {
+  test('7 players, groupSize=4, qualifiers=2, groupPhaseByes → groups of (4, 3+1bye)', () => {
+    const { matches } = logic.generateTournament(makePlayers(7), 4, 2, {
+      shufflePlayers: false,
+      groupPhaseByes: true,
+    });
+    // Group A: 4 players → C(4,2) = 6 real matches
+    // Group B: 3 players + 1 bye → each player faces the bye once (auto-win), plus C(3,2) = 3 real matches
+    // Group B total matches = 3 + 3 = 6 (equal group size = 4 including bye)
+    const gm = groupMatches(matches);
+    assert.equal(gm.length, 12, 'Both groups have 6 matches each (equal size with bye padded)');
+
+    // Bye matches should be auto-finished
+    const byeGroupMatches = gm.filter(
+      (m) => m.player1?.type === 'bye' || m.player2?.type === 'bye'
+    );
+    assert.equal(byeGroupMatches.length, 3, 'Group B should have 3 bye matches (one per real player)');
+    assert.ok(byeGroupMatches.every((m) => m.status === 'finished'), 'All bye matches auto-finished');
+    assert.ok(byeGroupMatches.every((m) => m.winner?.type === 'player'), 'Real player always wins vs bye');
+  });
+
+  test('5 players, groupSize=3, qualifiers=2, groupPhaseByes → groups of (3, 2+1bye)', () => {
+    const { matches } = logic.generateTournament(makePlayers(5), 3, 2, {
+      shufflePlayers: false,
+      groupPhaseByes: true,
+    });
+    const byeGroupMatches = groupMatches(matches).filter(
+      (m) => m.player1?.type === 'bye' || m.player2?.type === 'bye'
+    );
+    assert.equal(byeGroupMatches.length, 2, '2 real players in last group → 2 bye matches');
+    assert.ok(byeGroupMatches.every((m) => m.status === 'finished'));
+    assert.ok(byeGroupMatches.every((m) => m.winner?.type === 'player'));
+  });
+
+  test('byes never qualify: groupPhaseByes with 7 players → 4 qualifier slots from real players only', () => {
+    const { matches } = logic.generateTournament(makePlayers(7), 4, 2, {
+      shufflePlayers: false,
+      groupPhaseByes: true,
+    });
+    // 2 groups × 2 qualifiers = 4 total KO participants
+    // KO bracket: nextPow2(4) = 4 → 3 KO matches
+    const main = mainMatches(matches);
+    assert.equal(main.length, 3, '4 qualifiers → 3 KO matches');
+    assert.ok(getFinal(matches) !== null);
+  });
+
+  test('groups with exact player count (divisible) produce no byes even with option on', () => {
+    const { matches } = logic.generateTournament(makePlayers(8), 4, 2, {
+      shufflePlayers: false,
+      groupPhaseByes: true,
+    });
+    const byeGroupMatches = groupMatches(matches).filter(
+      (m) => m.player1?.type === 'bye' || m.player2?.type === 'bye'
+    );
+    assert.equal(byeGroupMatches.length, 0, 'No byes needed when players divide evenly');
+  });
+
+  test('groupPhaseByes + allPlayersOneGroup: one group, no byes generated', () => {
+    // allPlayersOneGroup takes precedence; groupPhaseByes is irrelevant
+    const { matches } = logic.generateTournament(makePlayers(5), 3, 2, {
+      shufflePlayers: false,
+      allPlayersOneGroup: true,
+      groupPhaseByes: true,
+    });
+    const byeGroupMatches = groupMatches(matches).filter(
+      (m) => m.player1?.type === 'bye' || m.player2?.type === 'bye'
+    );
+    assert.equal(byeGroupMatches.length, 0, 'No byes in single-group mode');
+  });
+});
+
 describe('GROUP_KO: group round-robin has correct pairing count', () => {
   const cases = [
     { n: 6,  gs: 3, q: 2, groupCount: 2, pairsPerGroup: 3, desc: '2 groups of 3' },

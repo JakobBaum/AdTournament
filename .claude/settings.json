@@ -1,4 +1,5 @@
 {
+  "language": "german",
   "permissions": {
     "allow": [
       "Bash(*)"

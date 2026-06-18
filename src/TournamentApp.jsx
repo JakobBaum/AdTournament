@@ -93,6 +93,8 @@ export default function TournamentApp() {
   const [playAllPlaces, setPlayAllPlaces] = useState(false);
   const [groupReturnLegs, setGroupReturnLegs] = useState(false);
   const [leagueReturnLegs, setLeagueReturnLegs] = useState(false);
+  const [allPlayersOneGroup, setAllPlayersOneGroup] = useState(false);
+  const [groupPhaseByes, setGroupPhaseByes] = useState(false);
   const [playerName, setPlayerName] = useState("");
   const [players, setPlayers] = useState(DEFAULT_PLAYERS);
   const [tournamentEnvironment, setTournamentEnvironment] = useState("online");
@@ -170,8 +172,10 @@ export default function TournamentApp() {
       playAllPlaces,
       groupReturnLegs,
       leagueReturnLegs,
+      allPlayersOneGroup,
+      groupPhaseByes,
     }),
-    [groupSize, qualifiers, playAllPlaces, groupReturnLegs, leagueReturnLegs],
+    [groupSize, qualifiers, playAllPlaces, groupReturnLegs, leagueReturnLegs, allPlayersOneGroup, groupPhaseByes],
   );
 
   const tournamentSettingsPayload = useMemo(
@@ -232,6 +236,8 @@ export default function TournamentApp() {
     setPlayAllPlaces(formatSettings.playAllPlaces);
     setGroupReturnLegs(formatSettings.groupReturnLegs);
     setLeagueReturnLegs(formatSettings.leagueReturnLegs);
+    setAllPlayersOneGroup(formatSettings.allPlayersOneGroup ?? false);
+    setGroupPhaseByes(formatSettings.groupPhaseByes ?? false);
     setRoundSettingsMap(normalizedSettings.roundSettings);
 
     setScreen(nextScreen);
@@ -609,14 +615,28 @@ export default function TournamentApp() {
       }
 
       if (mode === "GROUP_KO") {
-        const numGroups        = Math.ceil(players.length / groupSize);
-        const cappedQ          = Math.min(qualifiers, groupSize);
-        const totalQualifiers  = numGroups * cappedQ;
-        if (totalQualifiers < 2) {
+        const effectiveGroupSize = allPlayersOneGroup ? players.length : groupSize;
+        const numGroups   = Math.ceil(players.length / effectiveGroupSize);
+        const cappedQ     = Math.min(qualifiers, effectiveGroupSize);
+        const totalQ      = numGroups * cappedQ;
+
+        if (totalQ < 2) {
           toast.error(
-            `Zu wenige Qualifikanten (${totalQualifiers}) für eine KO-Runde. Erhöhe Qualifikanten pro Gruppe oder verringere die Gruppengröße.`
+            `Zu wenige Qualifikanten (${totalQ}) für eine KO-Runde. Erhöhe Qualifikanten pro Gruppe oder verringere die Gruppengröße.`
           );
           return;
+        }
+
+        // When groupPhaseByes is on, the last group must have enough real
+        // players to fill all qualifier spots — otherwise byes would advance.
+        if (groupPhaseByes && !allPlayersOneGroup) {
+          const remainder = players.length % effectiveGroupSize;
+          if (remainder !== 0 && remainder < qualifiers) {
+            toast.error(
+              `Freilos-Option nicht möglich: Die letzte Gruppe hätte nur ${remainder} echte Spieler, aber ${qualifiers} Qualifikanten pro Gruppe benötigt.`
+            );
+            return;
+          }
         }
       }
 
@@ -1150,6 +1170,10 @@ export default function TournamentApp() {
           setGroupReturnLegs={setGroupReturnLegs}
           leagueReturnLegs={leagueReturnLegs}
           setLeagueReturnLegs={setLeagueReturnLegs}
+          allPlayersOneGroup={allPlayersOneGroup}
+          setAllPlayersOneGroup={setAllPlayersOneGroup}
+          groupPhaseByes={groupPhaseByes}
+          setGroupPhaseByes={setGroupPhaseByes}
           allBoards={allBoards}
           boards={boards}
           setBoards={setBoards}

@@ -30,17 +30,24 @@ function nextPowerOfTwo(n) {
  * Computes the effective GROUP_KO structure from current settings.
  * Returns null when mode is not GROUP_KO.
  */
-function computeGroupKoPreview(playerCount, groupSize, qualifiersPerGroup) {
+function computeGroupKoPreview(playerCount, groupSize, qualifiersPerGroup, allPlayersOneGroup, groupPhaseByes) {
   if (playerCount < 1 || groupSize < 1) return null;
 
-  const numGroups          = Math.ceil(playerCount / groupSize);
-  const cappedQ            = Math.min(qualifiersPerGroup, groupSize);
+  const effectiveGroupSize = allPlayersOneGroup ? playerCount : groupSize;
+  const numGroups          = Math.ceil(playerCount / effectiveGroupSize);
+  const cappedQ            = Math.min(qualifiersPerGroup, effectiveGroupSize);
   const totalQ             = numGroups * cappedQ;
   const koBracketSize      = totalQ >= 2 ? nextPowerOfTwo(totalQ) : 0;
   const koByeCount         = koBracketSize - totalQ;
-  const lastGroupSize      = playerCount - (numGroups - 1) * groupSize;
-  const lastGroupSmaller   = numGroups > 1 && lastGroupSize < groupSize;
-  const qualifiersCapped   = qualifiersPerGroup > groupSize;
+  const remainder          = playerCount % effectiveGroupSize;
+  const lastGroupRealSize  = remainder === 0 ? effectiveGroupSize : remainder;
+  const lastGroupSmaller   = numGroups > 1 && lastGroupRealSize < effectiveGroupSize;
+  const qualifiersCapped   = qualifiersPerGroup > effectiveGroupSize;
+
+  // With groupPhaseByes: byes are added to make the last group full.
+  // But if the last group's real players < qualifiers, byes would advance — invalid.
+  const groupPhasByeConflict =
+    groupPhaseByes && !allPlayersOneGroup && lastGroupSmaller && lastGroupRealSize < qualifiersPerGroup;
 
   return {
     numGroups,
@@ -48,9 +55,11 @@ function computeGroupKoPreview(playerCount, groupSize, qualifiersPerGroup) {
     totalQ,
     koBracketSize,
     koByeCount,
-    lastGroupSize,
+    effectiveGroupSize,
+    lastGroupRealSize,
     lastGroupSmaller,
     qualifiersCapped,
+    groupPhasByeConflict,
     hasKoBracket:  totalQ >= 2,
     onlyOneGroup:  numGroups <= 1,
   };
@@ -58,7 +67,7 @@ function computeGroupKoPreview(playerCount, groupSize, qualifiersPerGroup) {
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
-function validateConfig(mode, players, groupSize, qualifiers) {
+function validateConfig(mode, players, groupSize, qualifiers, allPlayersOneGroup, groupPhaseByes) {
   const errors   = [];
   const warnings = [];
 
@@ -67,19 +76,26 @@ function validateConfig(mode, players, groupSize, qualifiers) {
   }
 
   if (mode === "GROUP_KO") {
-    const preview = computeGroupKoPreview(players.length, groupSize, qualifiers);
+    const preview = computeGroupKoPreview(players.length, groupSize, qualifiers, allPlayersOneGroup, groupPhaseByes);
     if (preview) {
       if (!preview.hasKoBracket) {
         errors.push(
           `Mit ${preview.totalQ} Qualifikant${preview.totalQ === 1 ? "" : "en"} kann keine KO-Runde gespielt werden. Erhöhe Qualifikanten oder Gruppen.`
         );
       }
-      if (preview.onlyOneGroup) {
-        warnings.push("Alle Spieler landen in einer Gruppe – erhöhe die Spieleranzahl oder verringere die Gruppengröße für mehrere Gruppen.");
+      if (preview.groupPhasByeConflict) {
+        errors.push(
+          `Freilos-Option nicht möglich: Die letzte Gruppe hätte nur ${preview.lastGroupRealSize} echte Spieler, aber ${qualifiers} Qualifikanten pro Gruppe benötigt.`
+        );
+      }
+      if (!allPlayersOneGroup && preview.onlyOneGroup) {
+        warnings.push(
+          "Alle Spieler landen in einer Gruppe – erhöhe die Spieleranzahl oder verringere die Gruppengröße für mehrere Gruppen, oder aktiviere 'Alle in eine Gruppe'."
+        );
       }
       if (preview.qualifiersCapped) {
         warnings.push(
-          `Qualifikanten wurden auf die Gruppengröße (${groupSize}) begrenzt – du kannst nicht mehr Spieler qualifizieren als in der Gruppe sind.`
+          `Qualifikanten wurden auf die Gruppengröße (${preview.effectiveGroupSize}) begrenzt.`
         );
       }
     }
@@ -100,11 +116,13 @@ function ValidationMsg({ type, children }) {
   );
 }
 
-function GroupKoPreview({ players, groupSize, qualifiers }) {
-  const preview = computeGroupKoPreview(players.length, groupSize, qualifiers);
+function GroupKoPreview({ players, groupSize, qualifiers, allPlayersOneGroup, groupPhaseByes }) {
+  const preview = computeGroupKoPreview(players.length, groupSize, qualifiers, allPlayersOneGroup, groupPhaseByes);
   if (!preview) return null;
 
-  const { numGroups, cappedQ, totalQ, koBracketSize, koByeCount, lastGroupSmaller, lastGroupSize } = preview;
+  const { numGroups, cappedQ, totalQ, koBracketSize, koByeCount, effectiveGroupSize,
+          lastGroupRealSize, lastGroupSmaller } = preview;
+  const groupByesCount = lastGroupSmaller && groupPhaseByes ? effectiveGroupSize - lastGroupRealSize : 0;
 
   return (
     <div className="tournament-preview">
@@ -115,12 +133,20 @@ function GroupKoPreview({ players, groupSize, qualifiers }) {
         <strong>{players.length}</strong>
       </div>
 
-      <div className={`tournament-preview__row ${numGroups <= 1 ? "tournament-preview__row--warn" : ""}`}>
+      <div className={`tournament-preview__row ${!allPlayersOneGroup && numGroups <= 1 ? "tournament-preview__row--warn" : ""}`}>
         <span>Gruppen</span>
         <strong>
-          {numGroups}
-          {lastGroupSmaller ? ` (letzte Gruppe: ${lastGroupSize} Spieler)` : ""}
+          {allPlayersOneGroup
+            ? "1 (alle Spieler)"
+            : numGroups + (lastGroupSmaller
+                ? ` (letzte: ${lastGroupRealSize} Spieler${groupPhaseByes ? ` + ${groupByesCount} Freilos` : ""})`
+                : "")}
         </strong>
+      </div>
+
+      <div className="tournament-preview__row">
+        <span>Spieler pro Gruppe</span>
+        <strong>{effectiveGroupSize}</strong>
       </div>
 
       <div className="tournament-preview__row">
@@ -136,15 +162,9 @@ function GroupKoPreview({ players, groupSize, qualifiers }) {
       {preview.hasKoBracket && (
         <>
           <div className="tournament-preview__row tournament-preview__row--ok">
-            <span>KO-Bracket Größe</span>
-            <strong>{koBracketSize} Spieler</strong>
+            <span>KO-Bracket</span>
+            <strong>{koBracketSize} Plätze{koByeCount > 0 ? ` (${koByeCount} Freilos)` : ""}</strong>
           </div>
-          {koByeCount > 0 && (
-            <div className="tournament-preview__row">
-              <span>Freilose in KO-Runde</span>
-              <strong>{koByeCount}</strong>
-            </div>
-          )}
         </>
       )}
 
@@ -209,6 +229,10 @@ function HomeScreenComponent(props) {
     setGroupReturnLegs,
     leagueReturnLegs,
     setLeagueReturnLegs,
+    allPlayersOneGroup,
+    setAllPlayersOneGroup,
+    groupPhaseByes,
+    setGroupPhaseByes,
     allBoards,
     boards,
     setBoards,
@@ -239,8 +263,8 @@ function HomeScreenComponent(props) {
 
   // Live validation
   const { errors, warnings, isValid } = useMemo(
-    () => validateConfig(mode, players, groupSize, qualifiers),
-    [mode, players, groupSize, qualifiers]
+    () => validateConfig(mode, players, groupSize, qualifiers, allPlayersOneGroup, groupPhaseByes),
+    [mode, players, groupSize, qualifiers, allPlayersOneGroup, groupPhaseByes]
   );
 
   const handleGroupSizeChange = (newSize) => {
@@ -476,18 +500,36 @@ function HomeScreenComponent(props) {
                   {mode === "GROUP_KO" && (
                     <>
                       <div className="field">
-                        <label>Spieler pro Gruppe</label>
+                        <label>Alle Spieler in eine Gruppe</label>
                         <select
-                          value={groupSize}
-                          onChange={(e) => handleGroupSizeChange(Number(e.target.value))}
+                          value={allPlayersOneGroup ? "yes" : "no"}
+                          onChange={(e) => {
+                            const next = e.target.value === "yes";
+                            setAllPlayersOneGroup(next);
+                            // Reset groupPhaseByes since it's irrelevant with one group
+                            if (next) setGroupPhaseByes(false);
+                          }}
                         >
-                          {GROUP_SIZE_OPTIONS.map((o) => (
-                            <option key={o} value={o} disabled={o > playerCount}>
-                              {o}{o > playerCount ? " (zu viele)" : ""}
-                            </option>
-                          ))}
+                          <option value="no">Mehrere Gruppen</option>
+                          <option value="yes">Alle in eine Gruppe</option>
                         </select>
                       </div>
+
+                      {!allPlayersOneGroup && (
+                        <div className="field">
+                          <label>Spieler pro Gruppe</label>
+                          <select
+                            value={groupSize}
+                            onChange={(e) => handleGroupSizeChange(Number(e.target.value))}
+                          >
+                            {GROUP_SIZE_OPTIONS.map((o) => (
+                              <option key={o} value={o} disabled={o > playerCount}>
+                                {o}{o > playerCount ? " (zu viele)" : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
                       <div className="field">
                         <label>Qualifikanten pro Gruppe</label>
@@ -495,11 +537,14 @@ function HomeScreenComponent(props) {
                           value={qualifiers}
                           onChange={(e) => setQualifiers(Number(e.target.value))}
                         >
-                          {QUALIFIER_OPTIONS.map((o) => (
-                            <option key={o} value={o} disabled={o > groupSize}>
-                              {o}{o > groupSize ? " (> Gruppengröße)" : ""}
-                            </option>
-                          ))}
+                          {QUALIFIER_OPTIONS.map((o) => {
+                            const maxQ = allPlayersOneGroup ? playerCount : groupSize;
+                            return (
+                              <option key={o} value={o} disabled={o > maxQ}>
+                                {o}{o > maxQ ? " (> Gruppengröße)" : ""}
+                              </option>
+                            );
+                          })}
                         </select>
                       </div>
                     </>
@@ -519,6 +564,20 @@ function HomeScreenComponent(props) {
                       <option value="double">Mit Rückrunde</option>
                     </select>
                   </div>
+
+                  {/* Freilos-Option: only meaningful when groups can be uneven */}
+                  {mode === "GROUP_KO" && !allPlayersOneGroup && (
+                    <div className="field">
+                      <label>Freilos in Gruppenphase</label>
+                      <select
+                        value={groupPhaseByes ? "yes" : "no"}
+                        onChange={(e) => setGroupPhaseByes(e.target.value === "yes")}
+                      >
+                        <option value="no">Ohne Freilos</option>
+                        <option value="yes">Mit Freilos (gleiche Gruppengrößen)</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Live structure preview for GROUP_KO */}
@@ -527,6 +586,8 @@ function HomeScreenComponent(props) {
                     players={players}
                     groupSize={groupSize}
                     qualifiers={qualifiers}
+                    allPlayersOneGroup={allPlayersOneGroup}
+                    groupPhaseByes={groupPhaseByes}
                   />
                 )}
 

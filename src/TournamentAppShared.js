@@ -59,6 +59,8 @@ export const DEFAULT_TOURNAMENT_FORMAT = {
   playAllPlaces: false,
   groupReturnLegs: false,
   leagueReturnLegs: false,
+  allPlayersOneGroup: false,
+  groupPhaseByes: false,
 };
 
 export function getTournamentTypeLabel(value) {

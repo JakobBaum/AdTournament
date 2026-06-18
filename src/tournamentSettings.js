@@ -25,22 +25,19 @@ export function extractMatchSettings(settings = {}) {
   };
 }
 
+function boolField(value, defaultValue) {
+  return typeof value === "boolean" ? value : defaultValue;
+}
+
 export function extractTournamentFormatSettings(settings = {}) {
   return {
-    groupSize: Number(settings?.groupSize) || DEFAULT_TOURNAMENT_FORMAT.groupSize,
-    qualifiers: Number(settings?.qualifiers) || DEFAULT_TOURNAMENT_FORMAT.qualifiers,
-    playAllPlaces:
-      typeof settings?.playAllPlaces === "boolean"
-        ? settings.playAllPlaces
-        : DEFAULT_TOURNAMENT_FORMAT.playAllPlaces,
-    groupReturnLegs:
-      typeof settings?.groupReturnLegs === "boolean"
-        ? settings.groupReturnLegs
-        : DEFAULT_TOURNAMENT_FORMAT.groupReturnLegs,
-    leagueReturnLegs:
-      typeof settings?.leagueReturnLegs === "boolean"
-        ? settings.leagueReturnLegs
-        : DEFAULT_TOURNAMENT_FORMAT.leagueReturnLegs,
+    groupSize:          Number(settings?.groupSize)    || DEFAULT_TOURNAMENT_FORMAT.groupSize,
+    qualifiers:         Number(settings?.qualifiers)   || DEFAULT_TOURNAMENT_FORMAT.qualifiers,
+    playAllPlaces:      boolField(settings?.playAllPlaces,      DEFAULT_TOURNAMENT_FORMAT.playAllPlaces),
+    groupReturnLegs:    boolField(settings?.groupReturnLegs,    DEFAULT_TOURNAMENT_FORMAT.groupReturnLegs),
+    leagueReturnLegs:   boolField(settings?.leagueReturnLegs,   DEFAULT_TOURNAMENT_FORMAT.leagueReturnLegs),
+    allPlayersOneGroup: boolField(settings?.allPlayersOneGroup, DEFAULT_TOURNAMENT_FORMAT.allPlayersOneGroup),
+    groupPhaseByes:     boolField(settings?.groupPhaseByes,     DEFAULT_TOURNAMENT_FORMAT.groupPhaseByes),
   };
 }
 
