@@ -4,7 +4,7 @@
   const TOKEN_ENDPOINT =
     "https://login.autodarts.io/realms/autodarts/protocol/openid-connect/token";
 
-  const LS_KEY = "AdTournamentExtensionBearerTokenSavedAT";
+  const LS_KEY = "AdTournamentExtensionBearerToken";
   const LS_USER_ID_KEY = "AdTournamentExtensionCurrentUser";
   const LS_TIME_KEY = "AdTournamentExtensionBearerTokenSavedAT";
   const MAX_AGE_MS = 2 * 60 * 60 * 1000;

@@ -44,6 +44,88 @@ export class Logik {
     return [...arr].sort(() => Math.random() - 0.5);
   }
 
+createRoundRobinSchedule(players = [], returnLegs = false) {
+  const realPlayers = Array.isArray(players) ? players.filter(Boolean) : [];
+  if (realPlayers.length < 2) return [];
+
+  const needsBye = realPlayers.length % 2 !== 0;
+  const rotation = [...realPlayers, ...(needsBye ? [this.createBye()] : [])];
+  const rounds = [];
+  const totalRounds = rotation.length - 1;
+  const half = rotation.length / 2;
+
+  for (let roundIndex = 0; roundIndex < totalRounds; roundIndex += 1) {
+    const pairings = [];
+
+    for (let i = 0; i < half; i += 1) {
+      const left = rotation[i];
+      const right = rotation[rotation.length - 1 - i];
+      const isLeftBye = left?.type === "bye";
+      const isRightBye = right?.type === "bye";
+      if (isLeftBye || isRightBye) continue;
+
+      const shouldSwap = roundIndex % 2 === 1;
+      pairings.push({
+        player1: shouldSwap ? right : left,
+        player2: shouldSwap ? left : right,
+      });
+    }
+
+    rounds.push(pairings);
+
+    const fixed = rotation[0];
+    const rotating = rotation.slice(1);
+    rotating.unshift(rotating.pop());
+    rotation.splice(0, rotation.length, fixed, ...rotating);
+  }
+
+  if (!returnLegs) return rounds;
+
+  const returnRounds = rounds.map((round) =>
+    round.map((pairing) => ({
+      player1: pairing.player2,
+      player2: pairing.player1,
+    })),
+  );
+
+  return [...rounds, ...returnRounds];
+}
+
+buildRoundRobinMatches(groupPlayers = [], options = {}) {
+  const {
+    groupName = "Liga",
+    groupLetter = "L",
+    startRound = 1,
+    returnLegs = false,
+  } = options;
+
+  const schedule = this.createRoundRobinSchedule(groupPlayers, returnLegs);
+  let groupMatchCounter = 1;
+
+  return schedule.flatMap((pairings, roundIndex) =>
+    pairings.map((pairing) => ({
+      matchNumber: `${groupLetter}-${groupMatchCounter++}`,
+      round: startRound + roundIndex,
+      groupRound: startRound + roundIndex,
+      group: groupName,
+      player1: pairing.player1,
+      player2: pairing.player2,
+      winner: null,
+      loser: null,
+      status: "pending",
+      boardId: null,
+      bracketType: "group",
+      placementRangeStart: null,
+      placementRangeEnd: null,
+      winnerPlace: null,
+      loserPlace: null,
+      displayRoundName: groupName,
+      placementGroupLabel: null,
+    })),
+  );
+}
+
+
   buildPlacementLabel(startPlace, endPlace, isFinal = false) {
     if (startPlace === 1 && endPlace === 2) return "Finale";
     if (startPlace === 3 && endPlace === 4) return "Spiel um Platz 3";
@@ -494,58 +576,36 @@ export class Logik {
     return orderedPairs.flat();
   }
 
-  generateTournament(players, playersPerGroup = 4, qualifiedPerGroup = 2, options = {}) {
-    if (!Array.isArray(players) || players.length < 2) {
-      throw new Error("Mindestens 2 Spieler nötig");
-    }
 
-    const shuffled = this.shuffleArray(players);
-
-    const groups = [];
+  buildGroupRoundRobinFromExistingGroups(groups = [], options = {}) {
+    const includeReturnLegs = !!options.groupReturnLegs;
     const matches = [];
-    const numGroups = Math.ceil(shuffled.length / playersPerGroup);
 
-    for (let g = 0; g < numGroups; g++) {
-      const start = g * playersPerGroup;
-      const end = start + playersPerGroup;
-      const groupPlayers = shuffled.slice(start, end);
-
+    for (let g = 0; g < groups.length; g += 1) {
+      const group = groups[g] || {};
       const groupLetter = String.fromCharCode(65 + g);
-      const groupName = `Gruppe ${groupLetter}`;
+      const groupName = group.name || `Gruppe ${groupLetter}`;
+      const groupPlayers = Array.isArray(group.players) ? group.players.filter(Boolean) : [];
 
-      groups.push({
-        name: groupName,
-        players: groupPlayers,
-      });
-
-      let groupMatchCounter = 1;
-
-      for (let i = 0; i < groupPlayers.length; i++) {
-        for (let j = i + 1; j < groupPlayers.length; j++) {
-          matches.push({
-            matchNumber: `${groupLetter}-${groupMatchCounter}`,
-            round: 1,
-            group: groupName,
-            player1: groupPlayers[i],
-            player2: groupPlayers[j],
-            winner: null,
-            loser: null,
-            status: "pending",
-            boardId: null,
-            bracketType: "group",
-            placementRangeStart: null,
-            placementRangeEnd: null,
-            winnerPlace: null,
-            loserPlace: null,
-            displayRoundName: groupName,
-            placementGroupLabel: null,
-          });
-
-          groupMatchCounter++;
-        }
-      }
+      matches.push(
+        ...this.buildRoundRobinMatches(groupPlayers, {
+          groupName,
+          groupLetter,
+          startRound: 1,
+          returnLegs: includeReturnLegs,
+        }),
+      );
     }
 
+    return matches;
+  }
+
+  generateTournamentFromGroups(groups = [], qualifiedPerGroup = 2, options = {}) {
+    if (!Array.isArray(groups) || groups.length === 0) {
+      throw new Error("Mindestens eine Gruppe nötig");
+    }
+
+    const matches = this.buildGroupRoundRobinFromExistingGroups(groups, options);
     const qualifierRefs = this.buildGroupKoSlots(groups, qualifiedPerGroup);
 
     if (qualifierRefs.length < 2) {
@@ -556,48 +616,95 @@ export class Logik {
       };
     }
 
-    const koSlots = qualifierRefs;
-
-    const bracket = this.buildMainBracket(koSlots, {
-      startRound: 2,
+    const bracket = this.buildMainBracket(qualifierRefs, {
+      startRound: Math.max(2, ...matches.map((match) => (Number(match.round) || 1) + 1)),
       startMatchNumber: 1,
       playAllPlaces: !!options.playAllPlaces,
     });
-
-    matches.push(...bracket.matches);
 
     return {
       type: "group_ko",
       groups,
-      matches,
+      matches: [...matches, ...bracket.matches],
     };
   }
 
-  generateKOTournament(players, options = {}) {
+  generateLeagueTournamentFromPlayers(players = [], options = {}) {
     if (!Array.isArray(players) || players.length < 2) {
       throw new Error("Mindestens 2 Spieler nötig");
     }
 
-    const bracketSize = this.nextPowerOfTwo(players.length);
-    const byes = bracketSize - players.length;
-    const firstRoundPlayers = this.distributeSlotsAvoidingDoubleByes([
-  ...players,
-  ...Array.from({ length: byes }, () => this.createBye()),
-]);
-
-    const bracket = this.buildMainBracket(firstRoundPlayers, {
-      startRound: 1,
-      startMatchNumber: 1,
-      playAllPlaces: !!options.playAllPlaces,
-    });
+    const groupName = "Liga";
 
     return {
-      type: "ko",
-      matches: bracket.matches,
+      type: "league",
+      groups: [{ name: groupName, players }],
+      matches: this.buildRoundRobinMatches(players, {
+        groupName,
+        groupLetter: "L",
+        startRound: 1,
+        returnLegs: !!options.leagueReturnLegs,
+      }),
     };
   }
 
-  async createFullTournament(
+generateTournament(players, playersPerGroup = 4, qualifiedPerGroup = 2, options = {}) {
+  if (!Array.isArray(players) || players.length < 2) {
+    throw new Error("Mindestens 2 Spieler nötig");
+  }
+
+  const basePlayers = options.shufflePlayers === false ? [...players] : this.shuffleArray(players);
+  const groups = [];
+  const numGroups = Math.ceil(basePlayers.length / playersPerGroup);
+
+  for (let g = 0; g < numGroups; g += 1) {
+    const start = g * playersPerGroup;
+    const end = start + playersPerGroup;
+    const groupLetter = String.fromCharCode(65 + g);
+    groups.push({
+      name: `Gruppe ${groupLetter}`,
+      players: basePlayers.slice(start, end),
+    });
+  }
+
+  return this.generateTournamentFromGroups(groups, qualifiedPerGroup, options);
+}
+
+generateKOTournament(players, options = {}) {
+  if (!Array.isArray(players) || players.length < 2) {
+    throw new Error("Mindestens 2 Spieler nötig");
+  }
+
+  const bracketSize = this.nextPowerOfTwo(players.length);
+  const byes = Math.max(0, bracketSize - players.length);
+  const firstRoundPlayers = this.distributeSlotsAvoidingDoubleByes([
+    ...players,
+    ...Array.from({ length: byes }, () => this.createBye()),
+  ]);
+
+  const bracket = this.buildMainBracket(firstRoundPlayers, {
+    startRound: 1,
+    startMatchNumber: 1,
+    playAllPlaces: !!options.playAllPlaces,
+  });
+
+  return {
+    type: "ko",
+    matches: bracket.matches,
+  };
+}
+
+generateLeagueTournament(players, options = {}) {
+  if (!Array.isArray(players) || players.length < 2) {
+    throw new Error("Mindestens 2 Spieler nötig");
+  }
+
+  const orderedPlayers = options.shufflePlayers === false ? [...players] : this.shuffleArray(players);
+  return this.generateLeagueTournamentFromPlayers(orderedPlayers, options);
+}
+
+async createFullTournament(
+
     tournamentName,
     type,
     players,
@@ -613,15 +720,27 @@ export class Logik {
     let playersWithIds = [];
     let groups = [];
 
-    if (type == "KO") {
+    if (type === "KO") {
       playersWithIds = await this.db.createPlayers(tournamentId, players, settings);
       await new Promise((r) => setTimeout(r, 0));
       data = this.generateKOTournament(playersWithIds, settings);
+    } else if (type === "LEAGUE") {
+      const previewData = this.generateLeagueTournament(players, settings);
+      groups = await this.db.createGroups(tournamentId, previewData.groups);
+      playersWithIds = await this.db.createPlayersGroups(tournamentId, groups, settings);
+      data = this.generateLeagueTournamentFromPlayers(playersWithIds, { ...settings, shufflePlayers: false });
     } else {
       const previewData = this.generateTournament(players, playersPerGroup, qualifiedPerGroup, settings);
       groups = await this.db.createGroups(tournamentId, previewData.groups);
       playersWithIds = await this.db.createPlayersGroups(tournamentId, groups, settings);
-      data = this.generateTournament(playersWithIds, playersPerGroup, qualifiedPerGroup, settings);
+      const groupsWithPlayers = groups.map((group) => ({
+        ...group,
+        players: playersWithIds.filter((player) => player.groupId === group.id),
+      }));
+      data = this.generateTournamentFromGroups(groupsWithPlayers, qualifiedPerGroup, {
+        ...settings,
+        shufflePlayers: false,
+      });
     }
 
     await this.db.createMatches(tournamentId, data.matches, playersWithIds);

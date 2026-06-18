@@ -97,6 +97,21 @@ export class AutodartsApi {
     toast.error(message, { id: "ad-reload-alert" });
   }
 
+
+  scheduleReload(message = "Dein Login ist abgelaufen. Die Seite wird neu geladen.") {
+    try {
+      if (window.__adTourneyReloadScheduled) return;
+      window.__adTourneyReloadScheduled = true;
+      this.showReloadAlert(message);
+      window.sessionStorage.setItem('adTournamentTokenReloadPending', '1');
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 1200);
+    } catch {
+      // ignore
+    }
+  }
+
   async getBearerToken() {
     const storageValues = await chromeStorageGet([
       TOKEN_STORAGE_KEY,
@@ -109,26 +124,36 @@ export class AutodartsApi {
     return readPageLocalStorage(TOKEN_STORAGE_KEY);
   }
 
+  // Polls for a valid token every 500 ms for up to timeoutMs.
+  // The AutoDarts SPA silently refreshes tokens; injected.js persists the
+  // new token to storage shortly after expiry. This gives the SPA time to
+  // refresh before we give up and trigger a disruptive page reload.
+  async waitForValidToken(timeoutMs = 10000) {
+    const interval = 500;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, interval));
+      const t = await this.getBearerToken();
+      if (t && this.isTokenValid(t).valid) return t;
+    }
+    return null;
+  }
+
   async ensureValidToken() {
     const token = await this.getBearerToken();
 
-    if (!token) {
-      this.showReloadAlert("Kein gültiger Login gefunden. Bitte lade die Seite neu.");
-      throw this.createReloadRequiredError(
-        "Kein Bearer Token gefunden. Bitte lade die Seite neu."
-      );
+    if (token && this.isTokenValid(token).valid) {
+      return token;
     }
 
-    const validation = this.isTokenValid(token);
+    // Token is missing or expired — give the SPA time to silently refresh it
+    const refreshed = await this.waitForValidToken(10000);
+    if (refreshed) return refreshed;
 
-    if (!validation.valid) {
-      this.showReloadAlert("Dein Login ist abgelaufen oder ungültig. Bitte lade die Seite neu.");
-      throw this.createReloadRequiredError(
-        "Dein Bearer Token ist abgelaufen oder ungültig. Bitte lade die Seite neu."
-      );
-    }
-
-    return token;
+    this.scheduleReload("Dein Login ist abgelaufen. Die Seite wird neu geladen.");
+    throw this.createReloadRequiredError(
+      "Dein Bearer Token ist abgelaufen oder fehlt. Bitte lade die Seite neu."
+    );
   }
 
   async getAuthHeaders(extraHeaders = {}) {
@@ -168,13 +193,14 @@ export class AutodartsApi {
         typeof body === "string" ? body : JSON.stringify(body || {});
       const normalizedErrorText = String(errorText || "").toLowerCase();
 
-      if (
-        response.status === 401 &&
-        normalizedErrorText.includes("token has invalid claims")
-      ) {
-        this.showReloadAlert("Dein Login ist nicht mehr gültig. Bitte lade die Seite neu.");
+      if (response.status === 401) {
+        // Wait for the SPA to silently refresh the token before reloading
+        const refreshed = await this.waitForValidToken(8000);
+        if (!refreshed) {
+          this.scheduleReload("Dein Login ist nicht mehr gültig. Die Seite wird neu geladen.");
+        }
         throw this.createReloadRequiredError(
-          "Dein Autodarts-Token ist nicht mehr gültig. Bitte lade die Seite neu."
+          "Autodarts hat den Token abgelehnt. Bitte lade die Seite neu."
         );
       }
 

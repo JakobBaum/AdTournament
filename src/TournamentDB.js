@@ -12,6 +12,7 @@ import {
   getDocs,
   where,
   deleteField,
+  runTransaction,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -78,6 +79,42 @@ const DEFAULT_PLAYER_STATS = {
 export class TournamentDB {
   constructor() {
     this.db = db;
+  }
+
+  isRetryableFirestoreError(error) {
+    const code = String(error?.code || '').toLowerCase();
+    const message = String(error?.message || '').toLowerCase();
+
+    return (
+      code === 'failed-precondition' ||
+      code === 'aborted' ||
+      code === 'unavailable' ||
+      message.includes('failed-precondition') ||
+      message.includes('too much contention') ||
+      message.includes('transaction') ||
+      message.includes('aborted')
+    );
+  }
+
+  async runTransactionWithRetry(handler, options = {}) {
+    const maxAttempts = Number(options?.maxAttempts || 4);
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await runTransaction(this.db, handler);
+      } catch (error) {
+        lastError = error;
+
+        if (!this.isRetryableFirestoreError(error) || attempt >= maxAttempts) {
+          throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, Math.min(250 * attempt, 1000)));
+      }
+    }
+
+    throw lastError;
   }
 
   resolveTournamentType(input = null) {
@@ -388,6 +425,10 @@ export class TournamentDB {
       manuallyCorrectedAt: null,
       lobbyId: null,
       boardId: null,
+      watcherClientId: null,
+      watcherHeartbeatAt: null,
+      startReservationClientId: null,
+      startReservationAt: null,
     };
   }
 
@@ -398,6 +439,7 @@ export class TournamentDB {
 
   buildPlayerStatsFromMatches(matches = [], players = []) {
     const playerStatsMap = new Map();
+    const playerStatsById = new Map();
 
     for (const player of players) {
       const key = String(player.name || "")
@@ -405,11 +447,16 @@ export class TournamentDB {
         .toLowerCase();
       if (!key) continue;
 
-      playerStatsMap.set(key, {
+      const entry = {
         playerId: player.id,
         playerName: player.name,
         ...DEFAULT_PLAYER_STATS,
-      });
+      };
+
+      playerStatsMap.set(key, entry);
+      if (player?.id) {
+        playerStatsById.set(String(player.id).trim(), entry);
+      }
     }
 
     for (const match of matches) {
@@ -444,29 +491,38 @@ export class TournamentDB {
       const score2 = this.extractScoreSummary(match.scorePlayer2);
       const finalEntries = Array.isArray(match.finalPlayerStats) ? match.finalPlayerStats : [];
 
-      const findFinalEntryForPlayer = (playerName) =>
-        finalEntries.find(
-          (entry) =>
-            String(entry?.name || "")
-              .trim()
-              .toLowerCase() ===
-            String(playerName || "")
-              .trim()
-              .toLowerCase(),
-        );
+      const findFinalEntryForPlayer = (player) => {
+        const playerId = String(player?.id || "").trim();
+        const playerName = String(player?.name || "")
+          .trim()
+          .toLowerCase();
 
-      const player1FinalEntry = findFinalEntryForPlayer(match.player1.name);
-      const player2FinalEntry = findFinalEntryForPlayer(match.player2.name);
+        return finalEntries.find((entry) => {
+          const entryPlayerId = String(entry?.playerId || entry?.id || "").trim();
+          const entryPlayerName = String(entry?.name || "")
+            .trim()
+            .toLowerCase();
+
+          return (playerId && entryPlayerId && entryPlayerId === playerId) ||
+            (playerName && entryPlayerName && entryPlayerName === playerName);
+        });
+      };
+
+      const player1FinalEntry = findFinalEntryForPlayer(match.player1);
+      const player2FinalEntry = findFinalEntryForPlayer(match.player2);
+
+      const player1FinalStats = player1FinalEntry?.stats || player1FinalEntry || null;
+      const player2FinalStats = player2FinalEntry?.stats || player2FinalEntry || null;
 
       const legs1 =
         Number(score1.legs || 0) > 0
           ? Number(score1.legs || 0)
-          : Number(player1FinalEntry?.stats?.legsWon || 0);
+          : Number(player1FinalStats?.legsWon || 0);
 
       const legs2 =
         Number(score2.legs || 0) > 0
           ? Number(score2.legs || 0)
-          : Number(player2FinalEntry?.stats?.legsWon || 0);
+          : Number(player2FinalStats?.legsWon || 0);
 
       player1Stats.legsWon += legs1;
       player1Stats.legsLost += legs2;
@@ -482,11 +538,13 @@ export class TournamentDB {
         const playerKey = String(entry?.name || "")
           .trim()
           .toLowerCase();
-        const target = playerStatsMap.get(playerKey);
-        if (!target || !entry?.stats) continue;
+        const playerId = String(entry?.playerId || entry?.id || "").trim();
+        const target = (playerId ? playerStatsById.get(playerId) : null) || playerStatsMap.get(playerKey);
+        const rawStats = entry?.stats || entry || null;
+        if (!target || !rawStats) continue;
 
-        const normalizedStats = this.normalizePlayerStats(entry.stats);
-        const hasThrownDarts = this.hasPlayerThrownDarts(entry.stats);
+        const normalizedStats = this.normalizePlayerStats(rawStats);
+        const hasThrownDarts = this.hasPlayerThrownDarts(rawStats);
 
         if (hasThrownDarts) {
           target.totalAverageSum += normalizedStats.average || 0;
@@ -494,7 +552,7 @@ export class TournamentDB {
           target.dartsThrown += normalizedStats.dartsThrown || 0;
         }
 
-        if (this.isCricketStats(entry.stats)) {
+        if (this.isCricketStats(rawStats)) {
           target.totalMprSum += normalizedStats.mpr || 0;
           target.mprCount += 1;
           target.totalFirst9MprSum += normalizedStats.first9MPR || 0;
@@ -601,7 +659,8 @@ export class TournamentDB {
           dartsThrown: nextStats.dartsThrown || 0,
           ...relevantStats,
           liveAverage: 0,
-          lastStatsUpdateAt: new Date(),
+          lastStatsUpdateAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         });
       }),
     );
@@ -727,6 +786,11 @@ export class TournamentDB {
 
   async getMatchesByTournamentId(tournamentId) {
     const snap = await getDocs(this.tRef(tournamentId, "matches"));
+    return this.mapSnap(snap);
+  }
+
+  async getBoardsByTournamentId(tournamentId) {
+    const snap = await getDocs(this.tRef(tournamentId, "boards"));
     return this.mapSnap(snap);
   }
 
@@ -1150,6 +1214,7 @@ export class TournamentDB {
         const ref = await addDoc(this.tRef(tournamentId, "players"), {
           name,
           ...storedDefaults,
+          updatedAt: new Date().toISOString(),
         });
 
         return { id: ref.id, name };
@@ -1173,6 +1238,7 @@ export class TournamentDB {
           name: p.name,
           groupId: p.groupId,
           ...storedDefaults,
+          updatedAt: new Date().toISOString(),
         });
 
         return { id: ref.id, ...p };
@@ -1206,6 +1272,186 @@ export class TournamentDB {
   // =========================
   // 🎯 MATCHES
   // =========================
+
+  async reserveMatchStart(tournamentId, matchId, boardDocId, metadata = {}) {
+    if (!tournamentId || !matchId || !boardDocId) {
+      throw new Error("Turnier, Match oder Board fehlt");
+    }
+
+    const matchRef = this.tDoc(tournamentId, "matches", matchId);
+    const boardRef = this.tDoc(tournamentId, "boards", boardDocId);
+
+    return this.runTransactionWithRetry(async (transaction) => {
+      const [matchSnap, boardSnap] = await Promise.all([
+        transaction.get(matchRef),
+        transaction.get(boardRef),
+      ]);
+
+      if (!matchSnap.exists()) {
+        throw new Error("Spiel wurde nicht gefunden");
+      }
+
+      if (!boardSnap.exists()) {
+        throw new Error("Board wurde nicht gefunden");
+      }
+
+      const match = { id: matchSnap.id, ...matchSnap.data() };
+      const board = { id: boardSnap.id, ...boardSnap.data() };
+
+      if (match.status !== "pending") {
+        throw new Error("Das Spiel wurde bereits auf einem anderen Gerät gestartet oder bearbeitet");
+      }
+
+      if (board.status !== "free" || board.currentMatchId) {
+        throw new Error("Das Board ist bereits belegt");
+      }
+
+      const startedAt = new Date().toISOString();
+
+      transaction.update(boardRef, {
+        status: "busy",
+        currentMatchId: matchId,
+      });
+
+      transaction.update(matchRef, {
+        status: "started",
+        startedAt,
+        boardId: board.boardId || metadata.boardId || null,
+        lobbyId: metadata.lobbyId || null,
+        startReservationClientId: metadata.clientId || null,
+        startReservationAt: startedAt,
+        updatedAt: startedAt,
+      });
+
+      return {
+        match: {
+          ...match,
+          status: "started",
+          startedAt,
+          boardId: board.boardId || metadata.boardId || null,
+          lobbyId: metadata.lobbyId || null,
+        },
+        board: {
+          ...board,
+          status: "busy",
+          currentMatchId: matchId,
+        },
+      };
+    });
+  }
+
+  async attachLobbyToStartedMatch(tournamentId, matchId, data = {}) {
+    if (!tournamentId || !matchId) return;
+
+    const ref = this.tDoc(tournamentId, "matches", matchId);
+
+    await updateDoc(ref, {
+      ...(data?.lobbyId !== undefined ? { lobbyId: data.lobbyId } : {}),
+      ...(data?.boardId !== undefined ? { boardId: data.boardId } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async rollbackMatchStart(tournamentId, matchId, boardDocId) {
+    if (!tournamentId || !matchId || !boardDocId) return;
+
+    const matchRef = this.tDoc(tournamentId, "matches", matchId);
+    const boardRef = this.tDoc(tournamentId, "boards", boardDocId);
+
+    await this.runTransactionWithRetry(async (transaction) => {
+      const [matchSnap, boardSnap] = await Promise.all([
+        transaction.get(matchRef),
+        transaction.get(boardRef),
+      ]);
+
+      if (!matchSnap.exists() || !boardSnap.exists()) return;
+
+      const match = matchSnap.data() || {};
+      const board = boardSnap.data() || {};
+
+      if (match.status === "started" && !match.lobbyId) {
+        transaction.update(matchRef, {
+          ...this.clearMatchResultFields(),
+          status: "pending",
+          updatedAt: new Date().toISOString(),
+          startReservationClientId: null,
+          startReservationAt: null,
+          watcherClientId: null,
+          watcherHeartbeatAt: null,
+        });
+      }
+
+      if (board.currentMatchId === matchId || board.status !== "free") {
+        transaction.update(boardRef, {
+          status: "free",
+          currentMatchId: null,
+        });
+      }
+    });
+  }
+
+  async tryClaimMatchWatcher(tournamentId, matchId, clientId, heartbeatMaxAgeMs = 15000) {
+    if (!tournamentId || !matchId || !clientId) return false;
+
+    const matchRef = this.tDoc(tournamentId, "matches", matchId);
+
+    return this.runTransactionWithRetry(async (transaction) => {
+      const snap = await transaction.get(matchRef);
+      if (!snap.exists()) return false;
+
+      const match = snap.data() || {};
+      if (!["started", "live", "running"].includes(match.status)) return false;
+
+      const currentClientId = match.watcherClientId || null;
+      const heartbeatAt = match.watcherHeartbeatAt ? new Date(match.watcherHeartbeatAt).getTime() : 0;
+      const isStale = !heartbeatAt || Number.isNaN(heartbeatAt) || Date.now() - heartbeatAt > heartbeatMaxAgeMs;
+
+      if (currentClientId && currentClientId !== clientId && !isStale) {
+        return false;
+      }
+
+      transaction.update(matchRef, {
+        watcherClientId: clientId,
+        watcherHeartbeatAt: new Date().toISOString(),
+      });
+
+      return true;
+    });
+  }
+
+  async heartbeatMatchWatcher(tournamentId, matchId, clientId, timestamp = new Date().toISOString()) {
+    if (!tournamentId || !matchId || !clientId) return;
+
+    const matchRef = this.tDoc(tournamentId, "matches", matchId);
+    const snap = await getDoc(matchRef);
+    if (!snap.exists()) return;
+
+    const match = snap.data() || {};
+    if (match.watcherClientId !== clientId) {
+      throw new Error("MATCH_WATCHER_CLAIM_LOST");
+    }
+
+    await updateDoc(matchRef, {
+      watcherHeartbeatAt: timestamp,
+    });
+  }
+
+  async releaseMatchWatcher(tournamentId, matchId, clientId) {
+    if (!tournamentId || !matchId || !clientId) return;
+
+    const matchRef = this.tDoc(tournamentId, "matches", matchId);
+    const snap = await getDoc(matchRef);
+    if (!snap.exists()) return;
+
+    const match = snap.data() || {};
+    if (match.watcherClientId !== clientId) return;
+
+    await updateDoc(matchRef, {
+      watcherClientId: null,
+      watcherHeartbeatAt: null,
+    });
+  }
+
   async createMatches(tournamentId, matches, players) {
     const playerMap = new Map(players.map((p) => [p.name.trim(), p]));
 
@@ -1278,6 +1524,11 @@ export class TournamentDB {
           statsUpdatedAt: null,
           resultSource: null,
           manuallyCorrectedAt: null,
+          updatedAt: new Date().toISOString(),
+          startReservationClientId: null,
+          startReservationAt: null,
+          watcherClientId: null,
+          watcherHeartbeatAt: null,
         }),
       ),
     );
@@ -1288,7 +1539,8 @@ export class TournamentDB {
 
     await updateDoc(ref, {
       status: "started",
-      startedAt: new Date(),
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       ...data,
     });
   }
@@ -1301,9 +1553,10 @@ export class TournamentDB {
     await updateDoc(ref, {
       scorePlayer1: payload.scorePlayer1 ?? null,
       scorePlayer2: payload.scorePlayer2 ?? null,
-      statsUpdatedAt: new Date(),
+      statsUpdatedAt: new Date().toISOString(),
       ...(payload.lobbyId ? { lobbyId: payload.lobbyId } : {}),
       ...(payload.boardId ? { boardId: payload.boardId } : {}),
+      updatedAt: new Date().toISOString(),
     });
   }
 
@@ -1325,7 +1578,8 @@ export class TournamentDB {
       scorePlayer2: extra?.scorePlayer2 ?? null,
       ...(extra?.lobbyId ? { lobbyId: extra.lobbyId } : {}),
       ...(extra?.boardId ? { boardId: extra.boardId } : {}),
-      ...(extra?.statsUpdatedAt ? { statsUpdatedAt: extra.statsUpdatedAt } : {}),
+      statsUpdatedAt: extra?.statsUpdatedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
 
     const matches = await this.getMatchesByTournamentId(tournamentId);
@@ -1360,7 +1614,7 @@ export class TournamentDB {
       ...this.clearMatchResultFields(),
       status: "aborted",
       resultSource: "aborted",
-      statsUpdatedAt: new Date(),
+      statsUpdatedAt: new Date().toISOString(),
       ...extra,
     });
 
@@ -1393,8 +1647,8 @@ export class TournamentDB {
       scorePlayer1,
       scorePlayer2,
       resultSource: "manual",
-      manuallyCorrectedAt: new Date(),
-      statsUpdatedAt: new Date(),
+      manuallyCorrectedAt: new Date().toISOString(),
+      statsUpdatedAt: new Date().toISOString(),
     });
 
     const matches = await this.getMatchesByTournamentId(tournamentId);
@@ -1464,13 +1718,34 @@ export class TournamentDB {
     ]);
   }
 
-  async releaseBoard(tournamentId, boardId) {
+  async releaseBoard(tournamentId, boardId, matchId = null) {
     const boardRef = doc(this.db, "tournaments", tournamentId, "boards", boardId);
+
+    const boardSnap = await getDoc(boardRef);
+    if (!boardSnap.exists()) return;
+
+    const board = { id: boardSnap.id, ...boardSnap.data() };
+    const linkedMatchId = matchId || board.currentMatchId || null;
 
     await updateDoc(boardRef, {
       status: "free",
       currentMatchId: null,
     });
+
+    if (linkedMatchId) {
+      const matchRef = this.tDoc(tournamentId, "matches", linkedMatchId);
+      const matchSnap = await getDoc(matchRef);
+
+      if (matchSnap.exists()) {
+        const match = matchSnap.data() || {};
+        if (String(match.boardId || "") === String(board.boardId || "")) {
+          await updateDoc(matchRef, {
+            boardId: null,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
   }
 
   // =========================
