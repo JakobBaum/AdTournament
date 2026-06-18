@@ -1644,3 +1644,101 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ─── Tournament configuration validation & preview ─── */
+
+.config-card-hint {
+  font-size: 12px;
+  color: #7a8caa;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.validation-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.validation-msg--warn {
+  background: rgba(255, 180, 50, 0.10);
+  border: 1px solid rgba(255, 180, 50, 0.25);
+  color: #f5c542;
+}
+
+.validation-msg--error {
+  background: rgba(255, 70, 70, 0.10);
+  border: 1px solid rgba(255, 70, 70, 0.28);
+  color: #ff7070;
+}
+
+.validation-msg--info {
+  background: rgba(100, 160, 255, 0.08);
+  border: 1px solid rgba(100, 160, 255, 0.18);
+  color: #8ab4f8;
+}
+
+.validation-msg__icon {
+  flex-shrink: 0;
+  font-style: normal;
+}
+
+/* Live preview card shown under GROUP_KO settings */
+.tournament-preview {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tournament-preview__title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6c7fa8;
+  margin-bottom: 4px;
+}
+
+.tournament-preview__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #b5c3df;
+}
+
+.tournament-preview__row strong {
+  color: #dbe8ff;
+  font-weight: 600;
+}
+
+.tournament-preview__row--ok   strong { color: #6fcf97; }
+.tournament-preview__row--warn strong { color: #f5c542; }
+.tournament-preview__row--err  strong { color: #ff7070; }
+
+/* Disabled dropdown option styling (browser renders these grayed-out natively) */
+.field select option:disabled {
+  color: rgba(255,255,255,0.3);
+}
+
+/* Create-button area with inline error above it */
+.actions-with-error {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.actions-with-error .actions {
+  margin-top: 0;
+}

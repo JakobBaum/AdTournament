@@ -602,9 +602,22 @@ export default function TournamentApp() {
     let loadingToastId = null;
 
     try {
+      // ── Pre-flight validation ──────────────────────────────────────────
       if (players.length < 2) {
-        toast.error("Bitte mindestens 2 Spieler hinzufügen", { id: loadingToastId || undefined });
+        toast.error("Bitte mindestens 2 Spieler hinzufügen.");
         return;
+      }
+
+      if (mode === "GROUP_KO") {
+        const numGroups        = Math.ceil(players.length / groupSize);
+        const cappedQ          = Math.min(qualifiers, groupSize);
+        const totalQualifiers  = numGroups * cappedQ;
+        if (totalQualifiers < 2) {
+          toast.error(
+            `Zu wenige Qualifikanten (${totalQualifiers}) für eine KO-Runde. Erhöhe Qualifikanten pro Gruppe oder verringere die Gruppengröße.`
+          );
+          return;
+        }
       }
 
       setCreatingTournament(true);
@@ -617,7 +630,7 @@ export default function TournamentApp() {
       );
 
       if (selectedBoards.length <= 0) {
-        toast.error("Bitte mindestens 1 Board hinzufügen", { id: loadingToastId || undefined });
+        toast.error("Bitte mindestens 1 Board hinzufügen.", { id: loadingToastId || undefined });
         return;
       }
 
