@@ -1,6 +1,10 @@
 import toast from "./toast.js";
 import { getClientId, nowIsoString } from "./clientSession.js";
 import { extractFinalPlayerStatsFromAutodartsStats } from "./matchStats.js";
+import {
+  WATCHER_HEARTBEAT_INTERVAL_MS,
+  MATCH_POLL_MAX_DURATION_MS,
+} from "./constants.js";
 
 export const activeMatchWatchers = new Set();
 export const cancelledMatchWatchers = new Set();
@@ -62,8 +66,8 @@ export async function watchMatchUntilFinished({
   match,
   boardDocId,
   lobbyId,
-  intervalMs = 4000,
-  timeoutMs = 1000 * 60 * 60 * 4,
+  intervalMs = WATCHER_HEARTBEAT_INTERVAL_MS,
+  timeoutMs  = MATCH_POLL_MAX_DURATION_MS,
   db,
   autodartsApi,
 }) {

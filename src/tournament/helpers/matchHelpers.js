@@ -3,6 +3,7 @@ import {
   DEFAULT_TOURNAMENT_TYPE,
 } from "../../TournamentAppShared.js";
 import { extractMatchSettings, getEffectiveMatchSettings } from "../../tournamentSettings.js";
+import { normalizePlayerKey } from "../../utils/playerKey.js";
 
 export const cx = (...classes) => classes.filter(Boolean).join(" ");
 
@@ -254,7 +255,7 @@ export function buildGroupTables(matches = [], groups = [], qualifiedPerGroup = 
 
     const ensurePlayer = (player) => {
       if (!player || player.type !== "player") return null;
-      const key = String(player.id || player.name || "").trim().toLowerCase();
+      const key = normalizePlayerKey(player);
       if (!key) return null;
 
       if (!table.has(key)) {
@@ -385,7 +386,7 @@ export function getMatchPlayerKeys(match) {
   for (const slot of ["player1", "player2"]) {
     const player = match?.[slot];
     if (!player || player.type !== "player") continue;
-    const key = String(player.id || player.name || "").trim().toLowerCase();
+    const key = normalizePlayerKey(player);
     if (key) keys.push(key);
   }
   return keys;
@@ -446,7 +447,7 @@ export function validateTournamentDataConsistency(matches = [], players = []) {
   const warnings = [];
   const playerKeys = new Set(
     players
-      .map((player) => String(player?.id || player?.name || "").trim().toLowerCase())
+      .map((player) => normalizePlayerKey(player))
       .filter(Boolean),
   );
   const matchNumberSet = new Set();
@@ -471,7 +472,7 @@ export function validateTournamentDataConsistency(matches = [], players = []) {
     for (const slot of ["player1", "player2", "winner", "loser"]) {
       const player = match?.[slot];
       if (!player || player.type !== "player") continue;
-      const key = String(player.id || player.name || "").trim().toLowerCase();
+      const key = normalizePlayerKey(player);
       if (!key) {
         errors.push(`${label}: ${slot} ohne id/name`);
         continue;

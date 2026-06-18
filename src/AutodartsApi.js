@@ -218,22 +218,8 @@ export class AutodartsApi {
   }
 
   async getBoards() {
-    const data = await this.request(ENDPOINTS.boards, {
-      method: "GET",
-    });
-
+    const data = await this.request(ENDPOINTS.boards, { method: "GET" });
     return Array.isArray(data) ? data : [];
-    /*
-    async getBoards() {
-      const data = await this.request(ENDPOINTS.boards, {
-        method: "GET",
-      });
-
-      return (Array.isArray(data) ? data : []).filter(
-        (board) => board?.state?.connected === true
-      );
-    }
-    */
   }
 
   async createLobby(config = {}) {

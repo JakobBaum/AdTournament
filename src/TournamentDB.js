@@ -1,5 +1,18 @@
 import { initializeApp, getApps } from "firebase/app";
 import {
+  BASE_RETRY_BACKOFF_MS,
+  MAX_RETRY_BACKOFF_MS,
+  MAX_TRANSACTION_RETRIES,
+  WATCHER_CLAIM_STALE_MS,
+} from "./constants.js";
+import {
+  normalizePlayerStats,
+  hasPlayerThrownDarts,
+  isCricketStats,
+  extractScoreSummary,
+} from "./utils/statsHelpers.js";
+import { buildGroupStandings } from "./db/groupStandings.js";
+import {
   getFirestore,
   collection,
   addDoc,
@@ -97,7 +110,7 @@ export class TournamentDB {
   }
 
   async runTransactionWithRetry(handler, options = {}) {
-    const maxAttempts = Number(options?.maxAttempts || 4);
+    const maxAttempts = Number(options?.maxAttempts || MAX_TRANSACTION_RETRIES);
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -110,7 +123,9 @@ export class TournamentDB {
           throw error;
         }
 
-        await new Promise((resolve) => setTimeout(resolve, Math.min(250 * attempt, 1000)));
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(BASE_RETRY_BACKOFF_MS * attempt, MAX_RETRY_BACKOFF_MS))
+        );
       }
     }
 
@@ -157,73 +172,11 @@ export class TournamentDB {
     return snapshot.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }));
   }
 
-  normalizePlayerStats(stats = {}) {
-    return {
-      average: Number(stats?.average || 0),
-      checkoutsHit: Number(stats?.checkoutsHit ?? 0),
-      checkoutsAttempted: Number(stats?.checkouts ?? 0),
-      plus60: Number(stats?.plus60 || 0),
-      plus100: Number(stats?.plus100 || 0),
-      plus140: Number(stats?.plus140 || 0),
-      plus170: Number(stats?.plus170 || 0),
-      total180: Number(stats?.total180 || 0),
-      checkoutPoints: Number(stats?.checkoutPoints || 0),
-      mpr: Number(stats?.mpr || 0),
-      first9MPR: Number(stats?.first9MPR || stats?.first9Mpr || 0),
-      mark5: Number(stats?.mark5 || 0),
-      mark6: Number(stats?.mark6 || 0),
-      mark7: Number(stats?.mark7 || 0),
-      mark8: Number(stats?.mark8 || 0),
-      mark9: Number(stats?.mark9 || 0),
-      whiteHorse: Number(stats?.whiteHorse || 0),
-      dartsThrown: Number(stats?.dartsThrown || stats?.thrownDarts || stats?.totalDarts || 0),
-    };
-  }
-
-  hasPlayerThrownDarts(stats = {}) {
-    const possibleDartCounts = [
-      stats?.dartsThrown,
-      stats?.thrownDarts,
-      stats?.totalDarts,
-      stats?.darts,
-      stats?.throws,
-    ];
-
-    return possibleDartCounts.some((value) => Number(value || 0) > 0);
-  }
-
-  isCricketStats(stats = {}) {
-    return [
-      stats?.mpr,
-      stats?.first9MPR,
-      stats?.first9Mpr,
-      stats?.mark5,
-      stats?.mark6,
-      stats?.mark7,
-      stats?.mark8,
-      stats?.mark9,
-      stats?.whiteHorse,
-    ].some((value) => Number(value || 0) > 0);
-  }
-
-  extractScoreSummary(score) {
-    if (score == null) {
-      return { legs: 0, sets: 0 };
-    }
-
-    if (typeof score === "object") {
-      return {
-        legs: Number(score?.legs || 0),
-        sets: Number(score?.sets || 0),
-      };
-    }
-
-    const numericScore = Number(score);
-    return {
-      legs: Number.isFinite(numericScore) ? numericScore : 0,
-      sets: 0,
-    };
-  }
+  // Delegates to extracted utilities in src/utils/statsHelpers.js
+  normalizePlayerStats(stats = {})    { return normalizePlayerStats(stats); }
+  hasPlayerThrownDarts(stats = {})    { return hasPlayerThrownDarts(stats); }
+  isCricketStats(stats = {})          { return isCricketStats(stats); }
+  extractScoreSummary(score)          { return extractScoreSummary(score); }
 
   isRealPlayer(player) {
     return !!player && typeof player === "object" && player.type === "player";
@@ -666,117 +619,9 @@ export class TournamentDB {
     );
   }
 
+  // Delegate to extracted module in src/db/groupStandings.js
   buildGroupStandings(matches = [], groupName, qualifiedPerGroup = 2) {
-    const groupMatches = matches.filter((match) => match?.group === groupName);
-    const table = new Map();
-
-    const ensurePlayer = (player) => {
-      if (!player || player.type !== "player") return null;
-
-      const key = String(player.id || player.name || "")
-        .trim()
-        .toLowerCase();
-      if (!key) return null;
-
-      if (!table.has(key)) {
-        table.set(key, {
-          key,
-          player: {
-            type: "player",
-            id: player.id || null,
-            name: player.name || "—",
-            groupId: player.groupId || null,
-          },
-          played: 0,
-          wins: 0,
-          losses: 0,
-          points: 0,
-          legsWon: 0,
-          legsLost: 0,
-          legDiff: 0,
-          setsWon: 0,
-          setsLost: 0,
-          setDiff: 0,
-        });
-      }
-
-      return table.get(key);
-    };
-
-    for (const match of groupMatches) {
-      ensurePlayer(match?.player1);
-      ensurePlayer(match?.player2);
-
-      if (match?.status !== "finished") continue;
-      if (match?.player1?.type !== "player" || match?.player2?.type !== "player") continue;
-
-      const entry1 = ensurePlayer(match.player1);
-      const entry2 = ensurePlayer(match.player2);
-      if (!entry1 || !entry2) continue;
-
-      entry1.played += 1;
-      entry2.played += 1;
-
-      const score1 = this.extractScoreSummary(match.scorePlayer1);
-      const score2 = this.extractScoreSummary(match.scorePlayer2);
-
-      entry1.legsWon += score1.legs;
-      entry1.legsLost += score2.legs;
-      entry2.legsWon += score2.legs;
-      entry2.legsLost += score1.legs;
-
-      entry1.setsWon += score1.sets;
-      entry1.setsLost += score2.sets;
-      entry2.setsWon += score2.sets;
-      entry2.setsLost += score1.sets;
-
-      const winnerKey = String(match?.winner?.id || match?.winner?.name || "")
-        .trim()
-        .toLowerCase();
-
-      if (winnerKey && winnerKey === entry1.key) {
-        entry1.wins += 1;
-        entry1.points += 2;
-        entry2.losses += 1;
-      } else if (winnerKey && winnerKey === entry2.key) {
-        entry2.wins += 1;
-        entry2.points += 2;
-        entry1.losses += 1;
-      }
-    }
-
-    const standings = [...table.values()].map((entry) => ({
-      ...entry,
-      legDiff: entry.legsWon - entry.legsLost,
-      setDiff: entry.setsWon - entry.setsLost,
-    }));
-
-    standings.sort((a, b) => {
-      const pointsDiff = Number(b.points || 0) - Number(a.points || 0);
-      if (pointsDiff !== 0) return pointsDiff;
-
-      const winsDiff = Number(b.wins || 0) - Number(a.wins || 0);
-      if (winsDiff !== 0) return winsDiff;
-
-      const legDiff = Number(b.legDiff || 0) - Number(a.legDiff || 0);
-      if (legDiff !== 0) return legDiff;
-
-      const legsWonDiff = Number(b.legsWon || 0) - Number(a.legsWon || 0);
-      if (legsWonDiff !== 0) return legsWonDiff;
-
-      const setDiff = Number(b.setDiff || 0) - Number(a.setDiff || 0);
-      if (setDiff !== 0) return setDiff;
-
-      return String(a.player?.name || "").localeCompare(String(b.player?.name || ""), "de", {
-        sensitivity: "base",
-      });
-    });
-
-    return standings.map((entry, index) => ({
-      ...entry,
-      rank: index + 1,
-      isQualified: index < qualifiedPerGroup,
-    }));
+    return buildGroupStandings(matches, groupName, qualifiedPerGroup);
   }
 
   async getTournamentById(tournamentId) {
@@ -1390,7 +1235,7 @@ export class TournamentDB {
     });
   }
 
-  async tryClaimMatchWatcher(tournamentId, matchId, clientId, heartbeatMaxAgeMs = 15000) {
+  async tryClaimMatchWatcher(tournamentId, matchId, clientId, heartbeatMaxAgeMs = WATCHER_CLAIM_STALE_MS) {
     if (!tournamentId || !matchId || !clientId) return false;
 
     const matchRef = this.tDoc(tournamentId, "matches", matchId);
